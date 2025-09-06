@@ -7,8 +7,18 @@ export const getNetworkOptions = (isDark) => ({
         font: {
             size: 16,
             color: isDark ? '#ffffff' : '#333333',
-            background: isDark ? 'rgba(0,0,0,0.7)' : 'rgba(255,255,255,0.7)'
+            // background: isDark ? 'rgba(0,0,0,0.7)' : 'rgba(255,255,255,0.7)'
         },
+        scaling: {
+            min: 20,  // The smallest a node can be
+            max: 50,  // The largest a node can be
+            label: {
+                enabled: true, // Allow the label to influence the size
+                min: 20,       // Minimum font size
+                max: 50,       // Maximum font size
+            },
+        },
+
         borderWidth: 2,
         color: {
             border: isDark ? '#555555' : '#cccccc',
@@ -31,6 +41,7 @@ export const getNetworkOptions = (isDark) => ({
             highlight: '#007acc'
         },
         width: 2,
+        length: 300,
         shadow: {
             enabled: true,
             color: isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.1)',
