@@ -1,0 +1,58 @@
+# Orbit TODO
+
+## ✅ Done
+
+- Graph visualization with vis-network
+- Add/edit/delete nodes
+- Node notes and URLs
+- Collapse/expand parent nodes with colored clusters
+- Dark/light theme toggle
+- Local storage auto-save
+- Modal dialogs for node editing
+- Toolbar with action buttons
+
+## 🔧 Current Issues
+
+- [ ] Error handling for localStorage
+- [ ] Mobile responsiveness
+- [ ] Performance with large graphs
+
+## 🎯 Next Up (Before Launch)
+
+- [ ] backend with supabase
+- [ ] Search nodes by name
+- [ ] Keyboard shortcuts (Delete, Ctrl+N, Ctrl+E, Esc)
+- [ ] Export/import JSON
+- [ ] Zoom controls (fit, center, reset)
+- [ ] Better form validation
+- [ ] Rate limiting for backend signups
+- [ ] add URL validation
+
+## 💡 Later Ideas
+
+- [ ] Undo/redo
+- [ ] Node categories/tags
+- [ ] Multiple graph projects
+- [ ] Minimap for navigation
+- [ ] Node templates
+- [ ] Bulk operations
+- [ ] Export as image
+- [ ] Graph analytics (node count, depth)
+
+## 🐛 Known Bugs
+
+- [ ] Clusters selection failed one time i dont know why
+- [ ] Toolbar overlaps on small screens
+
+## 🚀 Launch Checklist
+
+- [ ] Add search + keyboard shortcuts + export
+- [ ] Test on different browsers
+- [ ] Fix mobile issues
+- [ ] Add loading states
+- [ ] Write basic docs
+
+---
+
+**Status**: Core app works, needs polish before launch
+**Focus**: Search functionality first

@@ -1,12 +1,14 @@
-import React, { useRef, useEffect, useState } from "react";
+import { useRef, useEffect, useState } from "react";
 import { DataSet, Network } from "vis-network/standalone";
 import { getNetworkOptions, getProjectHeaderStyle, getThemeToggleStyle, getFixedToolbarStyle } from './styles';
 import { GridBg } from './ui/GridBg';
+import { NodeModal } from "./NodeModal";
 
 const LOCAL_STORAGE_KEY = 'orbit-graph-data-v1';
 
-// --- DATA STORAGE FUNCTIONS (Unchanged) ---
+// Implementing local storage
 const saveDataToLocalStorage = (nodes, edges, collapsedIds) => {
+  /*The function converts the graph into simple js arrays each array is then converted to JSON string via stringify to store it this process done in reverse to load data from local storage*/ 
   try {
     const plainNodes = nodes.get({ returnType: 'Array' });
     const plainEdges = edges.get({ returnType: 'Array' });
@@ -20,9 +22,9 @@ const saveDataToLocalStorage = (nodes, edges, collapsedIds) => {
 
 const loadDataFromLocalStorage = () => {
   try {
-    const savedData = localStorage.getItem(LOCAL_STORAGE_KEY);
+    const savedData = localStorage.getItem(LOCAL_STORAGE_KEY); //uses key to identify and retrieve data from local storage
     if (savedData === null) return null;
-    return JSON.parse(savedData);
+    return JSON.parse(savedData); // Parses JSON back into js object
   } catch (error) {
     console.error("Failed to load graph data:", error);
     return null;
@@ -31,6 +33,7 @@ const loadDataFromLocalStorage = () => {
 
 // --- REACT COMPONENTS ---
 const generateNodeTitle = (node) => {
+  // Function to create the tooltip when a node is hovered which displays link and note if present
   const container = document.createElement('div');
   container.style.padding = '8px';
   container.style.fontFamily = 'Electrolize, sans-serif';
@@ -61,12 +64,13 @@ const generateNodeTitle = (node) => {
   return container;
 };
 
+// switch between dark and light mode
 const ThemeToggle = ({ isDark, onToggle }) => (
-  // ... (This component is unchanged)
   <div style={getThemeToggleStyle(isDark)} onClick={onToggle} title="Toggle theme"><span style={{ fontSize: '20px' }}>{isDark ? '🌞' : '🌙'}</span></div>
 );
 
-const FixedToolbar = ({ onAdd, onDelete, onEdit, onNote, isNodeSelected, selectedNodeLabel, isDark }) => {
+// UI of the toolbar with buttons to add, delete, edit nodes and add/edit notes
+const FixedToolbar = ({ onAddRoot, onAdd, onDelete, onEdit, onNote, isNodeSelected, selectedNodeLabel, isDark }) => {
   const buttonStyle = { 
     padding: '10px 16px', 
     border: 'none', 
@@ -102,6 +106,16 @@ const FixedToolbar = ({ onAdd, onDelete, onEdit, onNote, isNodeSelected, selecte
   
   return ( 
     <div style={getFixedToolbarStyle(isDark)}> 
+      {/* Add Root button - always enabled, uses modal */}
+      <button 
+        onClick={onAddRoot} // ✅ New handler
+        style={buttonStyle} // ✅ Always enabled
+        onMouseOver={(e) => (e.currentTarget.style.backgroundColor = '#005999')} 
+        onMouseOut={(e) => (e.currentTarget.style.backgroundColor = '#007acc')} 
+      > 
+        <span>🌟</span> Add Root 
+      </button> 
+
       <button 
         onClick={onAdd} 
         disabled={!isNodeSelected} 
@@ -175,6 +189,7 @@ const ProjectHeader = ({ isDark }) => (
   </div>
 );
 
+// creating root node on initial load
 const createInitialData = () => {
   const initialNodes = new DataSet([{ id: 1, label: "Root", shape: "circle", value: 25, isParent: true, note: "Start building your knowledge graph from here!" }]);
   initialNodes.forEach(node => {
@@ -189,14 +204,19 @@ export default function Graph() {
   const [selectedNodeId, setSelectedNodeId] = useState(null);
   const [isDark, setIsDark] = useState(true);
 
+  const [modalState, setModalState] = useState({ 
+  isOpen: false, 
+  mode: null, // 'add', 'edit', 'note'
+  node: null // The node being edited
+  });
+
   const [data] = useState(() => {
     const savedData = loadDataFromLocalStorage();
     if (savedData && savedData.nodes) {
       const nodes = new DataSet(savedData.nodes);
       const edges = new DataSet(savedData.edges);
 
-      // [Fix] Regenerate tooltips for all nodes loaded from storage.
-      // This ensures that saved notes are always visible on hover after a page reload.
+      // Updating notes for each node to ensure data persistence after reload
       nodes.forEach(node => {
         nodes.update({ id: node.id, title: generateNodeTitle(node) });
       });
@@ -206,70 +226,101 @@ export default function Graph() {
     return createInitialData();
   });
 
+  // State to track which parent nodes are collapsed for persistence
   const [collapsedParentIds, setCollapsedParentIds] = useState(() => {
     const savedData = loadDataFromLocalStorage();
     return new Set(savedData?.collapsed || []);
   });
 
-  // --- HANDLER FUNCTIONS ---
-  const handleAddNode = () => {
-    if (!selectedNodeId) return;
+  const openModal = (mode, nodeId) => {
+    if (!nodeId) return;
+
+    // Determine the actual node or parent node for context
+    const isCluster = String(nodeId).startsWith('cluster-');
+    const actualNodeId = isCluster ? parseInt(String(nodeId).replace('cluster-', '')) : nodeId;
+    const nodeData = data.nodes.get(actualNodeId);
     
-    const label = prompt("Enter a label for the new node:", "New Node");
-    if (!label) return;
-    
-    const url = prompt("Enter a URL for this node (optional):");
-    if (url === null) return;
-    
-    const isParent = window.confirm("Should this node be a parent (able to group other nodes)?");
-    
-    const newNode = {
-      id: Date.now(),
-      label,
-      url: url || '',
-      note: '',
-      isParent: isParent,
-      shape: isParent ? 'ellipse' : 'box',
-    };
-    
-    newNode.title = generateNodeTitle(newNode);
-    data.nodes.add(newNode);
-    data.edges.add({ from: selectedNodeId, to: newNode.id });
-    networkRef.current.unselectAll();
+    setModalState({
+      isOpen: true,
+      mode: mode,
+      nodeData: (mode === 'edit' || mode === 'note') ? nodeData : null,
+      parentId: (mode === 'add') ? actualNodeId : null,
+    });
   };
 
-  const handleEditNode = () => {
-    if (!selectedNodeId) return;
-    
-    const currentNode = data.nodes.get(selectedNodeId);
-    const newLabel = prompt("Edit the label:", currentNode.label);
-    if (newLabel === null) return;
-    
-    const newUrl = prompt("Enter the URL (optional):", currentNode.url || "");
-    if (newUrl === null) return;
-    
-    const updatedNode = {
-      ...currentNode,
-      label: newLabel || currentNode.label,
-      url: newUrl || ''
-    };
-    
-    updatedNode.title = generateNodeTitle(updatedNode);
-    data.nodes.update(updatedNode);
+  const closeModal = () => {
+    setModalState({ isOpen: false, mode: null, nodeData: null, parentId: null });
   };
 
-  const handleAddEditNote = () => {
-    if (!selectedNodeId) return;
-    const currentNode = data.nodes.get(selectedNodeId);
-    const newNote = prompt("Add or edit the note for this node:", currentNode.note || "");
-    if (newNote !== null) {
-      // [Fix] This explicitly updates the 'note' property on the node data object.
-      // This is the key change that ensures the note is saved correctly.
-      const updatedNode = { ...currentNode, note: newNote };
+  // Add new handler for root nodes
+  const handleAddRootNode = () => {
+    setModalState({
+      isOpen: true,
+      mode: 'addRoot', // ✅ New mode
+      nodeData: null,
+      parentId: null
+    });
+  };
+
+  // Update handleModalSubmit to handle the new mode
+  const handleModalSubmit = (formData) => {
+    if (modalState.mode === 'add') {
+      const newNode = {
+        id: Date.now(),
+        label: formData.label,
+        url: formData.url || '',
+        note: formData.note || '',
+        isParent: formData.isParent,
+        shape: formData.isParent ? 'ellipse' : 'box',
+      };
+      newNode.title = generateNodeTitle(newNode);
+      data.nodes.add(newNode);
+      data.edges.add({ from: modalState.parentId, to: newNode.id });
+    } else if (modalState.mode === 'addRoot') { // ✅ New case
+      const newRootNode = {
+        id: Date.now(),
+        label: formData.label,
+        url: formData.url || '',
+        note: formData.note || '',
+        isParent: true, // Root nodes are always parents
+        shape: 'circle',
+        value: 25
+      };
+      newRootNode.title = generateNodeTitle(newRootNode);
+      data.nodes.add(newRootNode);
+      
+      // Auto-select the new root node
+      setSelectedNodeId(newRootNode.id);
+      
+      // Focus on the new node
+      setTimeout(() => {
+        if (networkRef.current) {
+          networkRef.current.selectNodes([newRootNode.id]);
+          networkRef.current.focus(newRootNode.id, {
+            scale: 1,
+            animation: true
+          });
+        }
+      }, 100);
+    } else if (modalState.mode === 'edit' || modalState.mode === 'note') {
+      const updatedNode = {
+        ...modalState.nodeData,
+        label: formData.label,
+        url: formData.url,
+        note: formData.note,
+      };
       updatedNode.title = generateNodeTitle(updatedNode);
       data.nodes.update(updatedNode);
     }
+    closeModal();
   };
+
+  // --- HANDLER FUNCTIONS ---
+  const handleAddNode = () => openModal('add', selectedNodeId);
+  const handleEditNode = () => openModal('edit', selectedNodeId);
+  const handleAddEditNote = () => openModal('note', selectedNodeId);
+
+
   const handleDeleteNode = () => {
     if (!selectedNodeId || selectedNodeId === 1) return;
     
@@ -296,9 +347,7 @@ export default function Graph() {
     }
   };
 
-  /**
-   * Reusable helper function to collapse a parent node into a cluster.
-   */
+  //  Reusable helper function to collapse a parent node into a cluster.
   const collapseNode = (networkInstance, parentId) => {
     const node = data.nodes.get(parentId);
     if (!node || !node.isParent) return;
@@ -307,7 +356,7 @@ export default function Graph() {
     if (childNodes.length > 0) {
       const childCount = childNodes.length;
 
-      // Generate random colors that work well with both themes
+      // Generate random colors for clustered nodes that work well with both themes
       const getRandomClusterColor = () => {
         const colors = [
           // Vibrant colors that work on both dark and light backgrounds
@@ -332,35 +381,19 @@ export default function Graph() {
 
       const clusterColor = getRandomClusterColor();
 
-      // Calculate normalized size based on number of children
-      const minSize = 0.6;  // Minimum scaling factor
-      const maxSize = 1.4;  // Maximum scaling factor
-      const maxChildren = 20; // Assume max reasonable children count for normalization
-      
-      // Normalize child count between 0 and 1, then scale to our desired range
-      const normalizedCount = Math.min(childCount / maxChildren, 1);
-      const sizeMultiplier = minSize + (normalizedCount * (maxSize - minSize));
-      
-      // Calculate final size (base cluster size is around 25, adjust as needed)
-      const baseSize = 25;
-      const finalSize = Math.round(baseSize * sizeMultiplier);
-
       const clusterNodeProperties = {
         id: `cluster-${parentId}`,
         label: `${node.label} (+${childCount})`,
         note: node.note || '',
         shape: 'circle',
-        size: finalSize, // Dynamic size based on children count
+        value: childCount,
         color: { 
           background: clusterColor.bg, 
           border: clusterColor.border 
         },
-        font: { 
-          size: Math.max(12, Math.min(18, 12 + (normalizedCount * 6))), // Scale font size too (12-18px)
-          color: clusterColor.text 
-        }
+        font: { color: '#000000' }
       };
-      
+    
       clusterNodeProperties.title = generateNodeTitle(clusterNodeProperties);
 
       networkInstance.cluster({
@@ -372,7 +405,6 @@ export default function Graph() {
 
   // --- USE EFFECT HOOKS ---
   useEffect(() => {
-    // ... (This hook's logic is unchanged)
     const options = getNetworkOptions(isDark);
     const network = new Network(containerRef.current, data, options);
     networkRef.current = network;
@@ -430,12 +462,14 @@ export default function Graph() {
   }, [collapsedParentIds, data]);
 
   const selectedNode = selectedNodeId ? data.nodes.get(selectedNodeId) : null;
+  const isClusterSelected = selectedNodeId && String(selectedNodeId).startsWith('cluster-');
 
   return (
     <GridBg isDark={isDark}>
       <ProjectHeader isDark={isDark} />
       <ThemeToggle isDark={isDark} onToggle={() => setIsDark(!isDark)} />
       <FixedToolbar
+        onAddRoot={handleAddRootNode} // ✅ Pass the new handler
         onAdd={handleAddNode}
         onDelete={handleDeleteNode}
         onEdit={handleEditNode}
@@ -444,6 +478,16 @@ export default function Graph() {
         selectedNodeLabel={selectedNode?.label || ''}
         isDark={isDark}
       />
+
+      <NodeModal
+        isOpen={modalState.isOpen}
+        onClose={closeModal}
+        onSubmit={handleModalSubmit}
+        initialData={modalState.nodeData}
+        mode={modalState.mode} // ✅ This will now include 'addRoot'
+        isDark={isDark}
+      />
+
       <div
         ref={containerRef}
         className="graph-container"
