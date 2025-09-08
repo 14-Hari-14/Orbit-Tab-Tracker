@@ -1,4 +1,4 @@
-import { useRef, useEffect, useState } from "react";
+import { useRef, useEffect, useState, useCallback } from "react";
 import { DataSet, Network } from "vis-network/standalone";
 import { getNetworkOptions, getProjectHeaderStyle, getThemeToggleStyle, getFixedToolbarStyle } from './styles';
 import { GridBg } from './ui/GridBg';
@@ -210,8 +210,8 @@ export default function Graph() {
   node: null // The node being edited
   });
 
+  const savedData = loadDataFromLocalStorage();
   const [data] = useState(() => {
-    const savedData = loadDataFromLocalStorage();
     if (savedData && savedData.nodes) {
       const nodes = new DataSet(savedData.nodes);
       const edges = new DataSet(savedData.edges);
@@ -226,11 +226,32 @@ export default function Graph() {
     return createInitialData();
   });
 
-  // State to track which parent nodes are collapsed for persistence
-  const [collapsedParentIds, setCollapsedParentIds] = useState(() => {
-    const savedData = loadDataFromLocalStorage();
-    return new Set(savedData?.collapsed || []);
-  });
+  // Use ref for immediate updates
+  const collapsedParentIds = useRef(new Set(savedData?.collapsed || []));
+
+  // Helper to get direct children
+  const getDirectChildren = useCallback((parentId) => {
+    return data.edges.get({ filter: edge => edge.from === parentId }).map(edge => edge.to);
+  }, [data]);
+
+  // Helper to get bottom-up order for initial collapse
+  const getBottomUpOrder = useCallback((collapsedSet) => {
+    const order = [];
+    const visited = new Set();
+
+    const visit = (id) => {
+      if (visited.has(id)) return;
+      visited.add(id);
+
+      const children = getDirectChildren(id).filter(c => collapsedSet.has(c));
+      children.forEach(visit);
+
+      order.push(id);
+    };
+
+    Array.from(collapsedSet).forEach(visit);
+    return order;
+  }, [getDirectChildren]);
 
   const openModal = (mode, nodeId) => {
     if (!nodeId) return;
@@ -347,61 +368,112 @@ export default function Graph() {
     }
   };
 
+  // Recursive open descendants
+  const recursiveOpenDescendants = useCallback((networkInstance, originalParentId) => {
+    const directChildren = getDirectChildren(originalParentId);
+    directChildren.forEach((childId) => {
+      const childNode = data.nodes.get(childId);
+      if (childNode?.isParent && collapsedParentIds.current.has(childId)) {
+        const innerClusterId = `cluster-${childId}`;
+        // Open the inner cluster (now visible after parent open)
+        networkInstance.openCluster(innerClusterId);
+        collapsedParentIds.current.delete(childId);
+      }
+      // Always recurse to handle deeper levels
+      recursiveOpenDescendants(networkInstance, childId);
+    });
+  }, [data, getDirectChildren]);
+
   //  Reusable helper function to collapse a parent node into a cluster.
-  const collapseNode = (networkInstance, parentId) => {
+  const collapseNode = useCallback((networkInstance, parentId) => {
+    if (collapsedParentIds.current.has(parentId)) return; // Already collapsed
+
     const node = data.nodes.get(parentId);
     if (!node || !node.isParent) return;
     
-    const childNodes = data.edges.get({ filter: edge => edge.from === parentId }).map(edge => edge.to);
-    if (childNodes.length > 0) {
-      const childCount = childNodes.length;
-
-      // Generate random colors for clustered nodes that work well with both themes
-      const getRandomClusterColor = () => {
-        const colors = [
-          // Vibrant colors that work on both dark and light backgrounds
-          { bg: '#FF6B6B', border: '#FF5252', text: '#000000' }, // Red
-          { bg: '#4ECDC4', border: '#26A69A', text: '#000000' }, // Teal
-          { bg: '#45B7D1', border: '#2196F3', text: '#000000' }, // Blue
-          { bg: '#96CEB4', border: '#66BB6A', text: '#000000' }, // Green
-          { bg: '#FECA57', border: '#FF9800', text: '#000000' }, // Orange
-          { bg: '#FF9FF3', border: '#E91E63', text: '#000000' }, // Pink
-          { bg: '#A8E6CF', border: '#4CAF50', text: '#000000' }, // Light Green
-          { bg: '#FFB347', border: '#FF5722', text: '#000000' }, // Peach
-          { bg: '#DDA0DD', border: '#9C27B0', text: '#000000' }, // Plum
-          { bg: '#87CEEB', border: '#03A9F4', text: '#000000' }, // Sky Blue
-          { bg: '#F0E68C', border: '#CDDC39', text: '#000000' }, // Khaki
-          { bg: '#FFA07A', border: '#FF7043', text: '#000000' }, // Light Salmon
-        ];
-        
-        // Use the parentId as seed for consistent colors per cluster
-        const index = parentId % colors.length;
-        return colors[index];
-      };
-
-      const clusterColor = getRandomClusterColor();
-
-      const clusterNodeProperties = {
-        id: `cluster-${parentId}`,
-        label: `${node.label} (+${childCount})`,
-        note: node.note || '',
-        shape: 'circle',
-        value: childCount,
-        color: { 
-          background: clusterColor.bg, 
-          border: clusterColor.border 
-        },
-        font: { color: '#000000' }
-      };
+    const originalChildren = getDirectChildren(parentId);
+    if (originalChildren.length === 0) return;
     
-      clusterNodeProperties.title = generateNodeTitle(clusterNodeProperties);
-
-      networkInstance.cluster({
-        joinCondition: (childNode) => childNodes.includes(childNode.id) || childNode.id === parentId,
-        clusterNodeProperties: clusterNodeProperties
+    // NEW: Recursively collapse all descendant parent nodes first
+    const collapseDescendantParents = (nodeId) => {
+      const children = getDirectChildren(nodeId);
+      children.forEach(childId => {
+        const childNode = data.nodes.get(childId);
+        if (childNode && childNode.isParent) {
+          // If this child is a parent and not already collapsed, collapse it first
+          if (!collapsedParentIds.current.has(childId)) {
+            collapseNode(networkInstance, childId);
+            collapsedParentIds.current.add(childId);
+          }
+        }
+        // Recursively check grandchildren
+        collapseDescendantParents(childId);
       });
-    }
-  };
+    };
+
+    // Collapse all descendant parents before creating this cluster
+    collapseDescendantParents(parentId);
+
+    const childCount = originalChildren.length;
+
+    // Get representatives for direct children (original or cluster)
+    const childReps = originalChildren.map(childId => 
+      collapsedParentIds.current.has(childId) ? `cluster-${childId}` : childId
+    );
+
+    // Generate random colors for clustered nodes that work well with both themes
+    const getRandomClusterColor = () => {
+      const colors = [
+        // Vibrant colors that work on both dark and light backgrounds
+        { bg: '#FF6B6B', border: '#FF5252', text: '#000000' }, // Red
+        { bg: '#4ECDC4', border: '#26A69A', text: '#000000' }, // Teal
+        { bg: '#45B7D1', border: '#2196F3', text: '#000000' }, // Blue
+        { bg: '#96CEB4', border: '#66BB6A', text: '#000000' }, // Green
+        { bg: '#FECA57', border: '#FF9800', text: '#000000' }, // Orange
+        { bg: '#FF9FF3', border: '#E91E63', text: '#000000' }, // Pink
+        { bg: '#A8E6CF', border: '#4CAF50', text: '#000000' }, // Light Green
+        { bg: '#FFB347', border: '#FF5722', text: '#000000' }, // Peach
+        { bg: '#DDA0DD', border: '#9C27B0', text: '#000000' }, // Plum
+        { bg: '#87CEEB', border: '#03A9F4', text: '#000000' }, // Sky Blue
+        { bg: '#F0E68C', border: '#CDDC39', text: '#000000' }, // Khaki
+        { bg: '#FFA07A', border: '#FF7043', text: '#000000' }, // Light Salmon
+      ];
+      
+      // Use the parentId as seed for consistent colors per cluster
+      const index = parentId % colors.length;
+      return colors[index];
+    };
+
+    const clusterColor = getRandomClusterColor();
+
+    const clusterNodeProperties = {
+      id: `cluster-${parentId}`,
+      label: `${node.label} (+${childCount})`,
+      note: node.note || '',
+      shape: 'circle',
+      value: childCount,
+      color: { 
+        background: clusterColor.bg, 
+        border: clusterColor.border 
+      },
+      font: { color: '#000000' }
+    };
+  
+    clusterNodeProperties.title = generateNodeTitle(clusterNodeProperties);
+
+    networkInstance.cluster({
+      joinCondition: (childNode) => childNode.id === parentId || childReps.includes(childNode.id),
+      clusterNodeProperties: clusterNodeProperties
+    });
+
+    // Mark as collapsed
+    collapsedParentIds.current.add(parentId);
+  }, [data, getDirectChildren, collapsedParentIds]);
+
+  // Auto-save function using ref
+  const autoSave = useCallback(() => {
+    saveDataToLocalStorage(data.nodes, data.edges, collapsedParentIds.current);
+  }, [data]);
 
   // --- USE EFFECT HOOKS ---
   useEffect(() => {
@@ -409,7 +481,6 @@ export default function Graph() {
     const network = new Network(containerRef.current, data, options);
     networkRef.current = network;
 
-    const autoSave = () => saveDataToLocalStorage(data.nodes, data.edges, collapsedParentIds);
     data.nodes.on('*', autoSave);
     data.edges.on('*', autoSave);
 
@@ -421,13 +492,13 @@ export default function Graph() {
       if (!nodeId) return;
 
       if (network.isCluster(nodeId) || String(nodeId).startsWith('cluster-')) {
-        network.openCluster(nodeId);
-        const parentId = parseInt(String(nodeId).replace('cluster-', ''));
-        setCollapsedParentIds(prev => {
-          const newSet = new Set(prev);
-          newSet.delete(parentId);
-          return newSet;
-        });
+        const clusterId = nodeId;
+        const parentId = parseInt(String(clusterId).replace('cluster-', ''));
+        network.openCluster(clusterId);
+        collapsedParentIds.current.delete(parentId);
+        // Recursively open descendants
+        recursiveOpenDescendants(network, parentId);
+        autoSave();
         return;
       }
 
@@ -436,14 +507,18 @@ export default function Graph() {
         window.open(node.url, "_blank");
       } else if (node?.isParent) {
         collapseNode(network, nodeId);
-        setCollapsedParentIds(prev => new Set(prev).add(nodeId));
+        autoSave();
       }
     });
 
-    if (collapsedParentIds.size > 0) {
-      collapsedParentIds.forEach(parentId => {
+    // Apply initial collapses in bottom-up order
+    if (collapsedParentIds.current.size > 0) {
+      const order = getBottomUpOrder(collapsedParentIds.current);
+      order.forEach(parentId => {
         collapseNode(network, parentId);
       });
+      // Save after initial setup
+      autoSave();
     }
 
     return () => {
@@ -451,15 +526,11 @@ export default function Graph() {
       data.edges.off('*', autoSave);
       network.destroy();
     };
-  }, [data]);
+  }, [data, isDark, autoSave, collapseNode, recursiveOpenDescendants, getBottomUpOrder]); // Dependencies for callbacks
 
   useEffect(() => {
     if (networkRef.current) { const options = getNetworkOptions(isDark); networkRef.current.setOptions(options); }
   }, [isDark]);
-
-  useEffect(() => {
-    saveDataToLocalStorage(data.nodes, data.edges, collapsedParentIds);
-  }, [collapsedParentIds, data]);
 
   const selectedNode = selectedNodeId ? data.nodes.get(selectedNodeId) : null;
   const isClusterSelected = selectedNodeId && String(selectedNodeId).startsWith('cluster-');
