@@ -108,8 +108,8 @@ const FixedToolbar = ({ onAddRoot, onAdd, onDelete, onEdit, onNote, isNodeSelect
     <div style={getFixedToolbarStyle(isDark)}> 
       {/* Add Root button - always enabled, uses modal */}
       <button 
-        onClick={onAddRoot} // ✅ New handler
-        style={buttonStyle} // ✅ Always enabled
+        onClick={onAddRoot} 
+        style={buttonStyle}
         onMouseOver={(e) => (e.currentTarget.style.backgroundColor = '#005999')} 
         onMouseOut={(e) => (e.currentTarget.style.backgroundColor = '#007acc')} 
       > 
@@ -540,7 +540,7 @@ export default function Graph() {
       <ProjectHeader isDark={isDark} />
       <ThemeToggle isDark={isDark} onToggle={() => setIsDark(!isDark)} />
       <FixedToolbar
-        onAddRoot={handleAddRootNode} // ✅ Pass the new handler
+        onAddRoot={handleAddRootNode} // Pass the new handler
         onAdd={handleAddNode}
         onDelete={handleDeleteNode}
         onEdit={handleEditNode}

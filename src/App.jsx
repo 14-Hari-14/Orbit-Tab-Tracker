@@ -1,11 +1,12 @@
 import React from "react";
 import Graph from "./components/Graph";
+//import { AuthProvider } from "./services/AuthContext";
 
 function App() {
   return (
     <div style={{ padding: "20px" }}>
       <h1>Orbit</h1>
-      <Graph />
+        <Graph />
     </div>
   );
 }
