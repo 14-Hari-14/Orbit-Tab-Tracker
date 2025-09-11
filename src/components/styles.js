@@ -78,18 +78,19 @@ export const getProjectHeaderStyle = (isDark) => ({
 
 // Theme Toggle component styles
 export const getThemeToggleStyle = (isDark) => ({
-    position: 'fixed',
-    top: '20px',
-    right: '240px',
+    height: '40px', // Match login button height
+    width: '40px', // Make it a square
     zIndex: 1000,
     backgroundColor: isDark ? 'rgba(40, 40, 40, 0.95)' : 'rgba(255, 255, 255, 0.95)',
     backdropFilter: 'blur(10px)',
     border: `1px solid ${isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)'}`,
-    borderRadius: '12px',
+    borderRadius: '8px', // Match login button
     boxShadow: '0 8px 32px rgba(0, 0, 0, 0.1)',
-    padding: '12px',
     cursor: 'pointer',
-    transition: 'all 0.2s ease'
+    transition: 'all 0.2s ease',
+    display: 'flex', // Center the icon
+    alignItems: 'center',
+    justifyContent: 'center'
 });
 
 // Fixed Toolbar component styles

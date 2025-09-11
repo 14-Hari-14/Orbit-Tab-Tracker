@@ -3,6 +3,8 @@ import { DataSet, Network } from "vis-network/standalone";
 import { getNetworkOptions, getProjectHeaderStyle, getThemeToggleStyle, getFixedToolbarStyle } from './styles';
 import { GridBg } from './ui/GridBg';
 import { NodeModal } from "./NodeModal";
+import sunIcon from '../assets/sun.png';
+import moonIcon from '../assets/moon.png';
 
 const LOCAL_STORAGE_KEY = 'orbit-graph-data-v1';
 
@@ -66,7 +68,13 @@ const generateNodeTitle = (node) => {
 
 // switch between dark and light mode
 const ThemeToggle = ({ isDark, onToggle }) => (
-  <div style={getThemeToggleStyle(isDark)} onClick={onToggle} title="Toggle theme"><span style={{ fontSize: '20px' }}>{isDark ? '🌞' : '🌙'}</span></div>
+  <div style={getThemeToggleStyle(isDark)} onClick={onToggle} title="Toggle theme">
+    <img 
+      src={isDark ? sunIcon : moonIcon} 
+      alt="Toggle theme" 
+      style={{ width: '24px', height: '24px' }} 
+    />
+  </div>
 );
 
 // UI of the toolbar with buttons to add, delete, edit nodes and add/edit notes
@@ -164,30 +172,91 @@ const FixedToolbar = ({ onAddRoot, onAdd, onDelete, onEdit, onNote, isNodeSelect
 };
 
 const ProjectHeader = ({ isDark }) => (
-  <div style={getProjectHeaderStyle(isDark)}>
-    <div style={{ fontSize: '20px' }}>🌌</div>
-    <div>
-      <h1 style={{
-        fontSize: '24px',
-        fontWeight: '600',
-        background: 'linear-gradient(135deg, #007acc, #0099ff)',
-        WebkitBackgroundClip: 'text',
-        WebkitTextFillColor: 'transparent',
-        backgroundClip: 'text',
-        margin: 0
-      }}>
-        Orbit
-      </h1>
-      <p style={{
-        fontSize: '12px',
-        color: isDark ? '#ccc' : '#666',
-        fontWeight: '400'
-      }}>
-        Visual Knowledge Graph
-      </p>
+  <div
+    style={{
+      ...getProjectHeaderStyle(isDark),
+      display: 'flex',
+      flexDirection: 'column', // stack vertically
+      alignItems: 'flex-start',
+    }}
+  >
+    {/* Orbit section */}
+    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', width: '100%' }}>
+      <div style={{ fontSize: '20px' }}>🌌</div>
+      <div>
+        <h1
+          style={{
+            fontSize: '24px',
+            fontWeight: '600',
+            background: 'linear-gradient(135deg, #007acc, #0099ff)',
+            WebkitBackgroundClip: 'text',
+            WebkitTextFillColor: 'transparent',
+            backgroundClip: 'text',
+            margin: 0,
+          }}
+        >
+          Orbit
+        </h1>
+        <p
+          style={{
+            fontSize: '12px',
+            color: isDark ? '#ccc' : '#666',
+            fontWeight: '400',
+            margin: 0,
+          }}
+        >
+          Visual Knowledge Graph
+        </p>
+      </div>
     </div>
   </div>
 );
+
+// Login/Logout Button Component
+const LoginButton = ({ isDark }) => {
+  // For now, we'll assume user is not logged in
+  const isLoggedIn = false;
+
+  const buttonStyle = {
+    padding: '0 16px', // Adjust padding
+    height: '40px', // Set a fixed height
+    border: 'none',
+    borderRadius: '8px',
+    cursor: 'pointer',
+    fontSize: '14px',
+    fontWeight: '500',
+    transition: 'all 0.2s ease',
+    backgroundColor: isLoggedIn ? '#dc3545' : '#007acc',
+    color: 'white',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
+    boxShadow: isDark 
+      ? '0 2px 8px rgba(0, 0, 0, 0.3)' 
+      : '0 2px 8px rgba(0, 0, 0, 0.1)',
+  };
+
+  const handleAuthClick = () => {
+    // Placeholder for future authentication logic
+    console.log(isLoggedIn ? 'Logging out...' : 'Logging in...');
+  };
+
+  return (
+    <button
+      onClick={handleAuthClick}
+      style={buttonStyle}
+      onMouseOver={(e) => {
+        e.currentTarget.style.backgroundColor = isLoggedIn ? '#c82333' : '#005999';
+      }}
+      onMouseOut={(e) => {
+        e.currentTarget.style.backgroundColor = isLoggedIn ? '#dc3545' : '#007acc';
+      }}
+    >
+      {isLoggedIn ? 'Logout' : 'Login'}
+    </button>
+  );
+};
+
 
 // creating root node on initial load
 const createInitialData = () => {
@@ -538,7 +607,17 @@ export default function Graph() {
   return (
     <GridBg isDark={isDark}>
       <ProjectHeader isDark={isDark} />
-      <ThemeToggle isDark={isDark} onToggle={() => setIsDark(!isDark)} />
+      <div style={{ 
+        position: 'fixed', 
+        top: '110px', 
+        left: '20px', 
+        display: 'flex', 
+        gap: '10px', 
+        zIndex: 1001 
+      }}>
+        <LoginButton isDark={isDark} />
+        <ThemeToggle isDark={isDark} onToggle={() => setIsDark(!isDark)} />
+      </div>
       <FixedToolbar
         onAddRoot={handleAddRootNode} // Pass the new handler
         onAdd={handleAddNode}
