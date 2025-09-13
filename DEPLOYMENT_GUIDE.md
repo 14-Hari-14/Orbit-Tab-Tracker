@@ -188,6 +188,39 @@ CREATE INDEX idx_edges_to_node ON edges(to_node_id);
 -- Add your OAuth credentials
 ```
 
+### 4. Set up hCaptcha (Optional but Recommended)
+
+1. **Create hCaptcha Account**:
+
+   - Go to https://www.hcaptcha.com/
+   - Sign up for a free account
+
+2. **Create a Site**:
+
+   - Click "New Site" in your dashboard
+   - Add your domains:
+     - `localhost` (for development)
+     - Your Vercel domain
+     - Any custom domains
+   - Copy your **Site Key**
+
+3. **Configure in Supabase**:
+
+   - Go to Authentication → Settings → Security and Protection
+   - Enable "Enable CAPTCHA protection"
+   - Select "hCaptcha" as provider
+   - Enter your **Secret Key** from hCaptcha
+
+4. **Add to Environment Variables**:
+
+   ```bash
+   VITE_HCAPTCHA_SITE_KEY=your_site_key_here
+   ```
+
+5. **Local Development**:
+   - For localhost testing, hCaptcha works out of the box
+   - For custom local domains, add them to your hCaptcha site settings
+
 ## 📱 Progressive Web App (PWA) Setup
 
 ### 1. Add PWA Manifest

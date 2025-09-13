@@ -38,7 +38,7 @@ CREATE TABLE edges (
 ALTER TABLE nodes ENABLE ROW LEVEL SECURITY;
 ALTER TABLE edges ENABLE ROW LEVEL SECURITY;
 
--- Row Level Security Policies
+-- Row Level Security Policies (Allow both authenticated and anonymous users)
 CREATE POLICY "Users can only see their own nodes" ON nodes
   FOR ALL USING (auth.uid() = user_id);
 

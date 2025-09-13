@@ -2,12 +2,12 @@ import { useRef, useEffect, useState, useCallback } from "react";
 import { DataSet, Network } from "vis-network/standalone";
 import { getNetworkOptions, getProjectHeaderStyle, getThemeToggleStyle, getFixedToolbarStyle } from './styles';
 import { GridBg } from './ui/GridBg';
+import HCaptcha from '@hcaptcha/react-hcaptcha';
 
 import {supabase} from './supabaseClient';
 import { fetchGraphData, addNodeToSupabase, addEdgeToSupabase, updateNodeInSupabase, deleteNodeFromSupabase } from './api'; 
 
 import { NodeModal } from "./NodeModal";
-import FuzzySearch from "./FuzzySearch";
 import sunIcon from '../assets/sun.png';
 import moonIcon from '../assets/moon.png';
 
@@ -279,7 +279,7 @@ const LoginButton = ({ isDark, session, onAuthClick }) => {
         e.currentTarget.style.backgroundColor = isLoggedIn && session.user.email ? '#28a745' : '#007acc';
       }}
     >
-      {isLoggedIn && session.user.email ? `Logged in as ${userEmail}` : 'Login to Sync'}
+      {isLoggedIn && session.user.email ? `✓ Synced as ${userEmail}` : '🔄 Sign in to Sync'}
     </button>
   );
 };
@@ -438,7 +438,6 @@ const KeyboardShortcutsModal = ({ isOpen, onClose, isDark }) => {
     {
       category: 'Navigation & Interaction',
       items: [
-        { key: 'Ctrl+K', description: 'Open fuzzy search' },
         { key: 'Ctrl+O', description: 'Open URL of selected node in new tab' },
         { key: 'Escape', description: 'Clear node selection' },
         { key: 'Space', description: 'Toggle collapse/expand for selected parent node' },
@@ -493,6 +492,7 @@ export default function Graph() {
   // Refs for graph data and network instance.
   const containerRef = useRef(null);
   const networkRef = useRef(null);
+  const captcha = useRef(null);
   const nodes = useRef(new DataSet([]));
   const edges = useRef(new DataSet([]));
   const collapsedParentIds = useRef(new Set());
@@ -507,9 +507,10 @@ export default function Graph() {
     parentId: null
   });
   const [session, setSession] = useState(null);
+  const [captchaToken, setCaptchaToken] = useState(null);
+  const [showCaptcha, setShowCaptcha] = useState(false);
   const [keyboardFeedback, setKeyboardFeedback] = useState(null);
   const [showKeyboardShortcuts, setShowKeyboardShortcuts] = useState(false);
-  const [showFuzzySearch, setShowFuzzySearch] = useState(false);
 
   useEffect(() => {
     const loaded = loadDataFromLocalStorage();
@@ -528,10 +529,38 @@ export default function Graph() {
     saveDataToLocalStorage(nodes.current, edges.current, collapsedParentIds.current);
   }, []);
 
-  // Initiates Google OAuth login via Supabase.
+  // Initiates Google OAuth login via Supabase with CAPTCHA protection.
   const handleLoginClick = async () => {
-    const { error } = await supabase.auth.signInWithOAuth({ provider: 'google' });
-    if (error) console.error("Error logging in:", error);
+    try {
+      // Show CAPTCHA if not verified yet
+      if (!captchaToken) {
+        setShowCaptcha(true);
+        showKeyboardFeedback("Please complete CAPTCHA verification first", true);
+        return;
+      }
+
+      const { error } = await supabase.auth.signInWithOAuth({ 
+        provider: 'google',
+        options: { captchaToken }
+      });
+      
+      if (error) {
+        console.error("Error logging in:", error);
+        showKeyboardFeedback("Login failed. Please try again.", true);
+      } else {
+        showKeyboardFeedback("Redirecting to Google...", false);
+      }
+      
+      // Reset CAPTCHA after login attempt
+      if (captcha.current) {
+        captcha.current.resetCaptcha();
+        setCaptchaToken(null);
+        setShowCaptcha(false);
+      }
+    } catch (error) {
+      console.error("Login error:", error);
+      showKeyboardFeedback("Login failed. Please try again.", true);
+    }
   };
 
   // Gets direct children of a parent node.
@@ -749,7 +778,7 @@ export default function Graph() {
         
         const savedEdge = await addEdgeToSupabase(modalState.parentId, savedNode.id);
         if (savedEdge) {
-          edges.current.add({ id: savedEdge.id, from: savedEdge.from_node, to: savedEdge.to_node });
+          edges.current.add({ id: savedEdge.id, from: savedEdge.from, to: savedEdge.to });
         }
         autoSave();
       }
@@ -876,42 +905,13 @@ export default function Graph() {
     setTimeout(() => setKeyboardFeedback(null), 2000);
   }, []);
 
-  // Handle fuzzy search node selection
-  const handleFuzzySearchSelectNode = useCallback((nodeId) => {
-    setSelectedNodeId(nodeId);
-    if (networkRef.current) {
-      networkRef.current.selectNodes([nodeId]);
-      networkRef.current.focus(nodeId, {
-        scale: 1.0,
-        animation: {
-          duration: 1000,
-          easingFunction: 'easeInOutQuart'
-        }
-      });
-    }
-    showKeyboardFeedback(`Selected node: ${nodes.current.get(nodeId)?.label}`, false);
-  }, [showKeyboardFeedback]);
-
-  // Handle fuzzy search node edit
-  const handleFuzzySearchEditNode = useCallback((nodeId) => {
-    setSelectedNodeId(nodeId);
-    openModal('edit', nodeId);
-  }, []);
-
-  // Handle fuzzy search URL open
-  const handleFuzzySearchOpenUrl = useCallback((url) => {
-    window.open(url, "_blank");
-    showKeyboardFeedback(`Opened ${url}`, false);
-  }, [showKeyboardFeedback]);
-
   // Handles keyboard shortcuts.
   const handleKeyDown = useCallback((event) => {
     // Don't handle shortcuts when typing in input fields or modals are open
     if (event.target.tagName === 'INPUT' || 
         event.target.tagName === 'TEXTAREA' || 
         event.target.contentEditable === 'true' ||
-        modalState.isOpen ||
-        showFuzzySearch) {
+        modalState.isOpen) {
       return;
     }
 
@@ -925,15 +925,7 @@ export default function Graph() {
       event.stopPropagation();
     };
 
-    // Ctrl+K: Open fuzzy search (placeholder for now)
-    if (ctrlKey && key === 'k') {
-      preventDefault();
-      setShowFuzzySearch(true);
-      showKeyboardFeedback("Opening fuzzy search", false);
-      return;
-    }
-
-    // Ctrl+R: Add root node
+    // Ctrl+Q: Add root node
     if (ctrlKey && key === 'q') {
       preventDefault();
       handleAddRootNode();
@@ -1074,7 +1066,7 @@ export default function Graph() {
       return;
     }
 
-  }, [selectedNodeId, modalState.isOpen, showFuzzySearch, nodes, handleAddRootNode, handleAddNode, handleDeleteNode, 
+  }, [selectedNodeId, modalState.isOpen, nodes, handleAddRootNode, handleAddNode, handleDeleteNode, 
       handleEditNode, handleAddEditNote, getAllDescendants, networkRef, collapsedParentIds, recursiveOpenDescendants, 
       collapseAllChildren, collapseNode, autoSave, showKeyboardFeedback]);
 
@@ -1085,13 +1077,13 @@ export default function Graph() {
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [handleKeyDown]);
 
-  // Sets up user session with Supabase, handling anonymous sign-in.
+  // Sets up user session with Supabase - skip anonymous sign-in to avoid CAPTCHA issues
   useEffect(() => {
     const setupUserSession = async () => {
       const { data: { session } } = await supabase.auth.getSession();
-      if (!session) {
-        await supabase.auth.signInAnonymously();
-      }
+      // If no session, that's fine - we'll work with local storage only for anonymous users
+      // No need to force anonymous sign-in since it requires CAPTCHA
+      setSession(session);
     };
 
     setupUserSession();
@@ -1099,10 +1091,19 @@ export default function Graph() {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session);
       console.log("Supabase auth state changed:", session);
+      
+      // Reset CAPTCHA state when user successfully logs in
+      if (session?.user?.email) {
+        setShowCaptcha(false);
+        setCaptchaToken(null);
+        if (captcha.current) {
+          captcha.current.resetCaptcha();
+        }
+      }
     });
 
     return () => subscription.unsubscribe();
-  }, []);
+  }, []); // No dependencies needed - only check initial session
 
   // Initializes the vis-network graph and handles events like selection and double-click.
   useEffect(() => {
@@ -1239,11 +1240,55 @@ export default function Graph() {
         top: '110px', 
         left: '20px', 
         display: 'flex', 
+        flexDirection: 'column',
         gap: '10px', 
         zIndex: 1001 
       }}>
-        <LoginButton isDark={isDark} session={session} onAuthClick={handleLoginClick} />
-        <ThemeToggle isDark={isDark} onToggle={() => setIsDark(!isDark)} />
+        <div style={{ display: 'flex', gap: '10px' }}>
+          <LoginButton isDark={isDark} session={session} onAuthClick={handleLoginClick} />
+          <ThemeToggle isDark={isDark} onToggle={() => setIsDark(!isDark)} />
+        </div>
+        
+        {/* CAPTCHA Component - Show only when login is attempted */}
+        {showCaptcha && (!session || !session.user?.email) && (
+          <div style={{
+            backgroundColor: isDark ? 'rgba(45, 55, 72, 0.95)' : 'rgba(255, 255, 255, 0.95)',
+            padding: '12px',
+            borderRadius: '8px',
+            border: isDark ? '1px solid #4a5568' : '1px solid #e2e8f0',
+            boxShadow: isDark 
+              ? '0 4px 12px rgba(0, 0, 0, 0.3)' 
+              : '0 4px 12px rgba(0, 0, 0, 0.1)',
+          }}>
+            <p style={{ 
+              margin: '0 0 8px 0', 
+              fontSize: '12px', 
+              color: isDark ? '#a0aec0' : '#718096',
+              textAlign: 'center'
+            }}>
+              Complete CAPTCHA to protect against abuse
+            </p>
+            <HCaptcha  
+              ref={captcha}
+              sitekey={import.meta.env.VITE_HCAPTCHA_SITE_KEY || "10000000-ffff-ffff-ffff-000000000001"}
+              onVerify={(token) => {    
+                setCaptchaToken(token);
+                setShowCaptcha(false);
+                showKeyboardFeedback("CAPTCHA verified! Click login again to continue.", false);
+              }}
+              onExpire={() => {
+                setCaptchaToken(null);
+                showKeyboardFeedback("CAPTCHA expired. Please verify again.", true);
+              }}
+              onError={(err) => {
+                console.error("CAPTCHA error:", err);
+                setCaptchaToken(null);
+                showKeyboardFeedback("CAPTCHA error. Please try again.", true);
+              }}
+              theme={isDark ? "dark" : "light"}
+            />
+          </div>
+        )}
       </div>
       <FixedToolbar
         onAddRoot={handleAddRootNode} 
@@ -1269,16 +1314,6 @@ export default function Graph() {
       <KeyboardShortcutsModal 
         isOpen={showKeyboardShortcuts}
         onClose={() => setShowKeyboardShortcuts(false)}
-        isDark={isDark}
-      />
-
-      <FuzzySearch
-        isOpen={showFuzzySearch}
-        onClose={() => setShowFuzzySearch(false)}
-        nodes={nodes.current.get()}
-        onSelectNode={handleFuzzySearchSelectNode}
-        onEditNode={handleFuzzySearchEditNode}
-        onOpenUrl={handleFuzzySearchOpenUrl}
         isDark={isDark}
       />
 

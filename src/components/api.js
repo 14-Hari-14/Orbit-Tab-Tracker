@@ -39,7 +39,12 @@ export const fetchGraphData = async () => {
  */
 export const addNodeToSupabase = async (node) => {
     const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return null;
+
+    // If no user (shouldn't happen with anonymous auth), fall back to local storage
+    if (!user) {
+        console.warn("No user session found, node will only exist locally");
+        return { ...node, isLocalOnly: true };
+    }
 
     // ✅ Use destructuring to separate the temporary client-side 'id'
     const { id: tempClientId, ...nodeData } = node;
@@ -52,7 +57,11 @@ export const addNodeToSupabase = async (node) => {
         .select()
         .single();
 
-    if (error) console.error('Error adding node:', error);
+    if (error) {
+        console.error('Error adding node:', error);
+        // Return local version as fallback
+        return { ...node, isLocalOnly: true };
+    }
     return data;
 };
 
@@ -63,10 +72,19 @@ export const addNodeToSupabase = async (node) => {
  * @param {string} fromNodeId - The UUID of the parent node.
  * @param {string} toNodeId - The UUID of the new child node.
  */
-// In api.js
 export const addEdgeToSupabase = async (fromNodeId, toNodeId) => {
     const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return null;
+
+    // If no user, return a local edge structure
+    if (!user) {
+        console.warn("No user session found, edge will only exist locally");
+        return {
+            id: `local-edge-${Date.now()}`,
+            from: fromNodeId,
+            to: toNodeId,
+            isLocalOnly: true
+        };
+    }
 
     const { data, error } = await supabase
         .from('edges')
@@ -75,8 +93,23 @@ export const addEdgeToSupabase = async (fromNodeId, toNodeId) => {
         .select('id, from_node, to_node')
         .single();
 
-    if (error) console.error('Error adding edge:', error);
-    return data;
+    if (error) {
+        console.error('Error adding edge:', error);
+        // Return local version as fallback
+        return {
+            id: `local-edge-${Date.now()}`,
+            from: fromNodeId,
+            to: toNodeId,
+            isLocalOnly: true
+        };
+    }
+
+    // Format the response to match vis.js expected format
+    return {
+        id: data.id,
+        from: data.from_node,
+        to: data.to_node
+    };
 };
 
 /**
