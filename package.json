@@ -1,8 +1,31 @@
 {
-  "name": "orbit",
-  "private": true,
-  "version": "0.0.0",
+  "name": "orbit-knowledge-graph",
+  "private": false,
+  "version": "1.0.0",
+  "description": "Visual knowledge graph for organizing and exploring ideas with fuzzy search and keyboard navigation",
   "type": "module",
+  "author": "Your Name <your.email@example.com>",
+  "license": "MIT",
+  "homepage": "https://orbit-knowledge-graph.vercel.app",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/your-username/orbit-knowledge-graph.git"
+  },
+  "bugs": {
+    "url": "https://github.com/your-username/orbit-knowledge-graph/issues"
+  },
+  "keywords": [
+    "knowledge-graph",
+    "visualization",
+    "note-taking",
+    "mind-mapping",
+    "research-tool",
+    "fuzzy-search",
+    "keyboard-navigation",
+    "react",
+    "vite",
+    "supabase"
+  ],
   "scripts": {
     "dev": "vite",
     "build": "vite build",
