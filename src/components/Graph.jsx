@@ -2,15 +2,21 @@ import { useRef, useEffect, useState, useCallback } from "react";
 import { DataSet, Network } from "vis-network/standalone";
 import { getNetworkOptions, getProjectHeaderStyle, getThemeToggleStyle, getFixedToolbarStyle } from './styles';
 import { GridBg } from './ui/GridBg';
+
+import {supabase} from './supabaseClient';
+import { fetchGraphData, addNodeToSupabase, addEdgeToSupabase, updateNodeInSupabase, deleteNodeFromSupabase } from './api'; 
+
 import { NodeModal } from "./NodeModal";
 import sunIcon from '../assets/sun.png';
 import moonIcon from '../assets/moon.png';
 
+// --- Constants ---
 const LOCAL_STORAGE_KEY = 'orbit-graph-data-v1';
+const DEFAULT_NODE_VALUE = 20; // New: Default value for node sizing to ensure visibility.
 
-// Implementing local storage
+// --- Utility Functions ---
+// Saves graph data (nodes, edges, collapsed IDs) to local storage for persistence.
 const saveDataToLocalStorage = (nodes, edges, collapsedIds) => {
-  /*The function converts the graph into simple js arrays each array is then converted to JSON string via stringify to store it this process done in reverse to load data from local storage*/ 
   try {
     const plainNodes = nodes.get({ returnType: 'Array' });
     const plainEdges = edges.get({ returnType: 'Array' });
@@ -22,25 +28,24 @@ const saveDataToLocalStorage = (nodes, edges, collapsedIds) => {
   }
 };
 
+// Loads graph data from local storage if available.
 const loadDataFromLocalStorage = () => {
   try {
-    const savedData = localStorage.getItem(LOCAL_STORAGE_KEY); //uses key to identify and retrieve data from local storage
+    const savedData = localStorage.getItem(LOCAL_STORAGE_KEY);
     if (savedData === null) return null;
-    return JSON.parse(savedData); // Parses JSON back into js object
+    return JSON.parse(savedData);
   } catch (error) {
     console.error("Failed to load graph data:", error);
     return null;
   }
 };
 
-// --- REACT COMPONENTS ---
+// Generates a tooltip element for node hover, displaying label, URL, and note.
 const generateNodeTitle = (node) => {
-  // Function to create the tooltip when a node is hovered which displays link and note if present
   const container = document.createElement('div');
   container.style.padding = '8px';
   container.style.fontFamily = 'Electrolize, sans-serif';
   container.style.fontSize = '14px';
-
 
   const labelEl = document.createElement('b');
   labelEl.innerText = node.label;
@@ -66,7 +71,24 @@ const generateNodeTitle = (node) => {
   return container;
 };
 
-// switch between dark and light mode
+// Creates initial graph data with a root node (not currently used, as data is fetched from Supabase).
+const createInitialData = () => {
+  const initialNodes = new DataSet([{ 
+    id: 1, 
+    label: "Root", 
+    shape: "circle", 
+    value: 25, 
+    is_parent: true, 
+    note: "Start building your knowledge graph from here!" 
+  }]);
+  initialNodes.forEach(node => {
+    initialNodes.update({ ...node, title: generateNodeTitle(node) });
+  });
+  return { nodes: initialNodes, edges: new DataSet([]) };
+};
+
+// --- Sub-Components ---
+// Toggles between dark and light themes.
 const ThemeToggle = ({ isDark, onToggle }) => (
   <div style={getThemeToggleStyle(isDark)} onClick={onToggle} title="Toggle theme">
     <img 
@@ -77,7 +99,48 @@ const ThemeToggle = ({ isDark, onToggle }) => (
   </div>
 );
 
-// UI of the toolbar with buttons to add, delete, edit nodes and add/edit notes
+// Displays the project header with title and description.
+const ProjectHeader = ({ isDark }) => (
+  <div
+    style={{
+      ...getProjectHeaderStyle(isDark),
+      display: 'flex',
+      flexDirection: 'column',
+      alignItems: 'flex-start',
+    }}
+  >
+    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', width: '100%' }}>
+      <div style={{ fontSize: '20px' }}>🌌</div>
+      <div>
+        <h1
+          style={{
+            fontSize: '24px',
+            fontWeight: '600',
+            background: 'linear-gradient(135deg, #007acc, #0099ff)',
+            WebkitBackgroundClip: 'text',
+            WebkitTextFillColor: 'transparent',
+            backgroundClip: 'text',
+            margin: 0,
+          }}
+        >
+          Orbit
+        </h1>
+        <p
+          style={{
+            fontSize: '12px',
+            color: isDark ? '#ccc' : '#666',
+            fontWeight: '400',
+            margin: 0,
+          }}
+        >
+          Visual Knowledge Graph
+        </p>
+      </div>
+    </div>
+  </div>
+);
+
+// Toolbar for graph actions like adding, editing, or deleting nodes.
 const FixedToolbar = ({ onAddRoot, onAdd, onDelete, onEdit, onNote, isNodeSelected, selectedNodeLabel, isDark }) => {
   const buttonStyle = { 
     padding: '10px 16px', 
@@ -114,7 +177,6 @@ const FixedToolbar = ({ onAddRoot, onAdd, onDelete, onEdit, onNote, isNodeSelect
   
   return ( 
     <div style={getFixedToolbarStyle(isDark)}> 
-      {/* Add Root button - always enabled, uses modal */}
       <button 
         onClick={onAddRoot} 
         style={buttonStyle}
@@ -171,62 +233,21 @@ const FixedToolbar = ({ onAddRoot, onAdd, onDelete, onEdit, onNote, isNodeSelect
   );
 };
 
-const ProjectHeader = ({ isDark }) => (
-  <div
-    style={{
-      ...getProjectHeaderStyle(isDark),
-      display: 'flex',
-      flexDirection: 'column', // stack vertically
-      alignItems: 'flex-start',
-    }}
-  >
-    {/* Orbit section */}
-    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', width: '100%' }}>
-      <div style={{ fontSize: '20px' }}>🌌</div>
-      <div>
-        <h1
-          style={{
-            fontSize: '24px',
-            fontWeight: '600',
-            background: 'linear-gradient(135deg, #007acc, #0099ff)',
-            WebkitBackgroundClip: 'text',
-            WebkitTextFillColor: 'transparent',
-            backgroundClip: 'text',
-            margin: 0,
-          }}
-        >
-          Orbit
-        </h1>
-        <p
-          style={{
-            fontSize: '12px',
-            color: isDark ? '#ccc' : '#666',
-            fontWeight: '400',
-            margin: 0,
-          }}
-        >
-          Visual Knowledge Graph
-        </p>
-      </div>
-    </div>
-  </div>
-);
-
-// Login/Logout Button Component
-const LoginButton = ({ isDark }) => {
-  // For now, we'll assume user is not logged in
-  const isLoggedIn = false;
+// Button for handling login/logout with dynamic styling based on session.
+const LoginButton = ({ isDark, session, onAuthClick }) => {
+  const isLoggedIn = !!session;
+  const userEmail = session?.user?.email?.split('@')[0] || 'Anonymous';
 
   const buttonStyle = {
-    padding: '0 16px', // Adjust padding
-    height: '40px', // Set a fixed height
+    padding: '0 16px',
+    height: '40px',
     border: 'none',
     borderRadius: '8px',
     cursor: 'pointer',
     fontSize: '14px',
     fontWeight: '500',
     transition: 'all 0.2s ease',
-    backgroundColor: isLoggedIn ? '#dc3545' : '#007acc',
+    backgroundColor: isLoggedIn && session.user.email ? '#28a745' : '#007acc',
     color: 'white',
     display: 'flex',
     alignItems: 'center',
@@ -236,74 +257,71 @@ const LoginButton = ({ isDark }) => {
       : '0 2px 8px rgba(0, 0, 0, 0.1)',
   };
 
-  const handleAuthClick = () => {
-    // Placeholder for future authentication logic
-    console.log(isLoggedIn ? 'Logging out...' : 'Logging in...');
-  };
-
   return (
     <button
-      onClick={handleAuthClick}
+      onClick={onAuthClick}
       style={buttonStyle}
       onMouseOver={(e) => {
-        e.currentTarget.style.backgroundColor = isLoggedIn ? '#c82333' : '#005999';
+        e.currentTarget.style.backgroundColor = isLoggedIn && session.user.email ? '#218838' : '#005999';
       }}
       onMouseOut={(e) => {
-        e.currentTarget.style.backgroundColor = isLoggedIn ? '#dc3545' : '#007acc';
+        e.currentTarget.style.backgroundColor = isLoggedIn && session.user.email ? '#28a745' : '#007acc';
       }}
     >
-      {isLoggedIn ? 'Logout' : 'Login'}
+      {isLoggedIn && session.user.email ? `Logged in as ${userEmail}` : 'Login to Sync'}
     </button>
   );
 };
 
-
-// creating root node on initial load
-const createInitialData = () => {
-  const initialNodes = new DataSet([{ id: 1, label: "Root", shape: "circle", value: 25, isParent: true, note: "Start building your knowledge graph from here!" }]);
-  initialNodes.forEach(node => {
-    initialNodes.update({ ...node, title: generateNodeTitle(node) });
-  });
-  return { nodes: initialNodes, edges: new DataSet([]) };
-};
-
+// --- Main Graph Component ---
 export default function Graph() {
+  // Refs for graph data and network instance.
   const containerRef = useRef(null);
   const networkRef = useRef(null);
+  const nodes = useRef(new DataSet([]));
+  const edges = useRef(new DataSet([]));
+  const collapsedParentIds = useRef(new Set());
+
+  // State management for selection, theme, modal, and user session.
   const [selectedNodeId, setSelectedNodeId] = useState(null);
   const [isDark, setIsDark] = useState(true);
-
   const [modalState, setModalState] = useState({ 
-  isOpen: false, 
-  mode: null, // 'add', 'edit', 'note'
-  node: null // The node being edited
+    isOpen: false, 
+    mode: null,
+    nodeData: null,
+    parentId: null
   });
+  const [session, setSession] = useState(null);
 
-  const savedData = loadDataFromLocalStorage();
-  const [data] = useState(() => {
-    if (savedData && savedData.nodes) {
-      const nodes = new DataSet(savedData.nodes);
-      const edges = new DataSet(savedData.edges);
-
-      // Updating notes for each node to ensure data persistence after reload
-      nodes.forEach(node => {
-        nodes.update({ id: node.id, title: generateNodeTitle(node) });
-      });
-
-      return { nodes, edges };
+  useEffect(() => {
+    const loaded = loadDataFromLocalStorage();
+    if (loaded) {
+      nodes.current.clear();
+      nodes.current.add(loaded.nodes);
+      edges.current.clear();
+      edges.current.add(loaded.edges);
+      collapsedParentIds.current = new Set(loaded.collapsed);
     }
-    return createInitialData();
-  });
+  }, []);
 
-  // Use ref for immediate updates
-  const collapsedParentIds = useRef(new Set(savedData?.collapsed || []));
+  // --- Handler Functions ---
+  // Auto-saves graph data to local storage.
+  const autoSave = useCallback(() => {
+    saveDataToLocalStorage(nodes.current, edges.current, collapsedParentIds.current);
+  }, []);
 
-  // Helper to get direct children
+  // Initiates Google OAuth login via Supabase.
+  const handleLoginClick = async () => {
+    const { error } = await supabase.auth.signInWithOAuth({ provider: 'google' });
+    if (error) console.error("Error logging in:", error);
+  };
+
+  // Gets direct children of a parent node.
   const getDirectChildren = useCallback((parentId) => {
-    return data.edges.get({ filter: edge => edge.from === parentId }).map(edge => edge.to);
-  }, [data]);
+    return edges.current.get({ filter: edge => edge.from === parentId }).map(edge => edge.to);
+  }, []);
 
-  // Helper to get bottom-up order for initial collapse
+  // Gets bottom-up order of collapsed nodes for initial setup.
   const getBottomUpOrder = useCallback((collapsedSet) => {
     const order = [];
     const visited = new Set();
@@ -322,194 +340,62 @@ export default function Graph() {
     return order;
   }, [getDirectChildren]);
 
-  const openModal = (mode, nodeId) => {
-    if (!nodeId) return;
-
-    // Determine the actual node or parent node for context
-    const isCluster = String(nodeId).startsWith('cluster-');
-    const actualNodeId = isCluster ? parseInt(String(nodeId).replace('cluster-', '')) : nodeId;
-    const nodeData = data.nodes.get(actualNodeId);
-    
-    setModalState({
-      isOpen: true,
-      mode: mode,
-      nodeData: (mode === 'edit' || mode === 'note') ? nodeData : null,
-      parentId: (mode === 'add') ? actualNodeId : null,
-    });
-  };
-
-  const closeModal = () => {
-    setModalState({ isOpen: false, mode: null, nodeData: null, parentId: null });
-  };
-
-  // Add new handler for root nodes
-  const handleAddRootNode = () => {
-    setModalState({
-      isOpen: true,
-      mode: 'addRoot', // ✅ New mode
-      nodeData: null,
-      parentId: null
-    });
-  };
-
-  // Update handleModalSubmit to handle the new mode
-  const handleModalSubmit = (formData) => {
-    if (modalState.mode === 'add') {
-      const newNode = {
-        id: Date.now(),
-        label: formData.label,
-        url: formData.url || '',
-        note: formData.note || '',
-        isParent: formData.isParent,
-        shape: formData.isParent ? 'ellipse' : 'box',
-      };
-      newNode.title = generateNodeTitle(newNode);
-      data.nodes.add(newNode);
-      data.edges.add({ from: modalState.parentId, to: newNode.id });
-    } else if (modalState.mode === 'addRoot') { // ✅ New case
-      const newRootNode = {
-        id: Date.now(),
-        label: formData.label,
-        url: formData.url || '',
-        note: formData.note || '',
-        isParent: true, // Root nodes are always parents
-        shape: 'circle',
-        value: 25
-      };
-      newRootNode.title = generateNodeTitle(newRootNode);
-      data.nodes.add(newRootNode);
-      
-      // Auto-select the new root node
-      setSelectedNodeId(newRootNode.id);
-      
-      // Focus on the new node
-      setTimeout(() => {
-        if (networkRef.current) {
-          networkRef.current.selectNodes([newRootNode.id]);
-          networkRef.current.focus(newRootNode.id, {
-            scale: 1,
-            animation: true
-          });
-        }
-      }, 100);
-    } else if (modalState.mode === 'edit' || modalState.mode === 'note') {
-      const updatedNode = {
-        ...modalState.nodeData,
-        label: formData.label,
-        url: formData.url,
-        note: formData.note,
-      };
-      updatedNode.title = generateNodeTitle(updatedNode);
-      data.nodes.update(updatedNode);
-    }
-    closeModal();
-  };
-
-  // --- HANDLER FUNCTIONS ---
-  const handleAddNode = () => openModal('add', selectedNodeId);
-  const handleEditNode = () => openModal('edit', selectedNodeId);
-  const handleAddEditNote = () => openModal('note', selectedNodeId);
-
-
-  const handleDeleteNode = () => {
-    if (!selectedNodeId || selectedNodeId === 1) return;
-    
-    if (window.confirm("Are you sure you want to delete this node and all its children?")) {
-      const edges = data.edges.get();
-      
-      const getAllDescendants = (nodeId) => {
-        const children = edges.filter(edge => edge.from === nodeId).map(edge => edge.to);
-        let descendants = [...children];
-        children.forEach(childId => {
-          descendants = [...descendants, ...getAllDescendants(childId)];
-        });
-        return descendants;
-      };
-      
-      const nodesToDelete = [selectedNodeId, ...getAllDescendants(selectedNodeId)];
-      const edgesToDelete = edges.filter(edge => 
-        nodesToDelete.includes(edge.from) || nodesToDelete.includes(edge.to)
-      );
-      
-      data.edges.remove(edgesToDelete.map(edge => edge.id));
-      data.nodes.remove(nodesToDelete);
-      setSelectedNodeId(null);
-    }
-  };
-
-  // Recursive open descendants
-  const recursiveOpenDescendants = useCallback((networkInstance, originalParentId) => {
-    const directChildren = getDirectChildren(originalParentId);
-    directChildren.forEach((childId) => {
-      const childNode = data.nodes.get(childId);
-      if (childNode?.isParent && collapsedParentIds.current.has(childId)) {
-        const innerClusterId = `cluster-${childId}`;
-        // Open the inner cluster (now visible after parent open)
-        networkInstance.openCluster(innerClusterId);
-        collapsedParentIds.current.delete(childId);
-      }
-      // Always recurse to handle deeper levels
-      recursiveOpenDescendants(networkInstance, childId);
-    });
-  }, [data, getDirectChildren]);
-
-  //  Reusable helper function to collapse a parent node into a cluster.
+  // Collapses a parent node into a cluster, handling descendants recursively.
   const collapseNode = useCallback((networkInstance, parentId) => {
-    if (collapsedParentIds.current.has(parentId)) return; // Already collapsed
+    if (collapsedParentIds.current.has(parentId)) return;
 
-    const node = data.nodes.get(parentId);
-    if (!node || !node.isParent) return;
+    const node = nodes.current.get(parentId);
+    if (!node || !node.is_parent) return;
     
     const originalChildren = getDirectChildren(parentId);
     if (originalChildren.length === 0) return;
     
-    // NEW: Recursively collapse all descendant parent nodes first
+    // Recursively collapse descendant parents.
     const collapseDescendantParents = (nodeId) => {
       const children = getDirectChildren(nodeId);
       children.forEach(childId => {
-        const childNode = data.nodes.get(childId);
-        if (childNode && childNode.isParent) {
-          // If this child is a parent and not already collapsed, collapse it first
+        const childNode = nodes.current.get(childId);
+        if (childNode && childNode.is_parent) {
           if (!collapsedParentIds.current.has(childId)) {
             collapseNode(networkInstance, childId);
             collapsedParentIds.current.add(childId);
           }
         }
-        // Recursively check grandchildren
         collapseDescendantParents(childId);
       });
     };
 
-    // Collapse all descendant parents before creating this cluster
     collapseDescendantParents(parentId);
 
     const childCount = originalChildren.length;
-
-    // Get representatives for direct children (original or cluster)
     const childReps = originalChildren.map(childId => 
       collapsedParentIds.current.has(childId) ? `cluster-${childId}` : childId
     );
 
-    // Generate random colors for clustered nodes that work well with both themes
+    // Generates consistent random color for clusters.
     const getRandomClusterColor = () => {
       const colors = [
-        // Vibrant colors that work on both dark and light backgrounds
-        { bg: '#FF6B6B', border: '#FF5252', text: '#000000' }, // Red
-        { bg: '#4ECDC4', border: '#26A69A', text: '#000000' }, // Teal
-        { bg: '#45B7D1', border: '#2196F3', text: '#000000' }, // Blue
-        { bg: '#96CEB4', border: '#66BB6A', text: '#000000' }, // Green
-        { bg: '#FECA57', border: '#FF9800', text: '#000000' }, // Orange
-        { bg: '#FF9FF3', border: '#E91E63', text: '#000000' }, // Pink
-        { bg: '#A8E6CF', border: '#4CAF50', text: '#000000' }, // Light Green
-        { bg: '#FFB347', border: '#FF5722', text: '#000000' }, // Peach
-        { bg: '#DDA0DD', border: '#9C27B0', text: '#000000' }, // Plum
-        { bg: '#87CEEB', border: '#03A9F4', text: '#000000' }, // Sky Blue
-        { bg: '#F0E68C', border: '#CDDC39', text: '#000000' }, // Khaki
-        { bg: '#FFA07A', border: '#FF7043', text: '#000000' }, // Light Salmon
+        { bg: '#FF6B6B', border: '#FF5252', text: '#000000' },
+        { bg: '#4ECDC4', border: '#26A69A', text: '#000000' },
+        { bg: '#45B7D1', border: '#2196F3', text: '#000000' },
+        { bg: '#96CEB4', border: '#66BB6A', text: '#000000' },
+        { bg: '#FECA57', border: '#FF9800', text: '#000000' },
+        { bg: '#FF9FF3', border: '#E91E63', text: '#000000' },
+        { bg: '#A8E6CF', border: '#4CAF50', text: '#000000' },
+        { bg: '#FFB347', border: '#FF5722', text: '#000000' },
+        { bg: '#DDA0DD', border: '#9C27B0', text: '#000000' },
+        { bg: '#87CEEB', border: '#03A9F4', text: '#000000' },
+        { bg: '#F0E68C', border: '#CDDC39', text: '#000000' },
+        { bg: '#FFA07A', border: '#FF7043', text: '#000000' },
       ];
       
-      // Use the parentId as seed for consistent colors per cluster
-      const index = parentId % colors.length;
+      // Handle string parentId with a simple hash
+      let hash = 0;
+      const strId = String(parentId);
+      for (let i = 0; i < strId.length; i++) {
+        hash = ((hash << 5) - hash + strId.charCodeAt(i)) | 0; // Simple hash function
+      }
+      const index = Math.abs(hash) % colors.length;
       return colors[index];
     };
 
@@ -520,7 +406,7 @@ export default function Graph() {
       label: `${node.label} (+${childCount})`,
       note: node.note || '',
       shape: 'circle',
-      value: childCount,
+      value: childCount, // Already sets a value here for clusters.
       color: { 
         background: clusterColor.bg, 
         border: clusterColor.border 
@@ -531,27 +417,229 @@ export default function Graph() {
     clusterNodeProperties.title = generateNodeTitle(clusterNodeProperties);
 
     networkInstance.cluster({
-      joinCondition: (childNode) => childNode.id === parentId || childReps.includes(childNode.id),
+      joinCondition: (childNode) => {
+        // Include the parent node itself
+        if (childNode.id === parentId) return true;
+        
+        // Include all direct children (both regular nodes and cluster representatives)
+        return originalChildren.includes(childNode.id) || childReps.includes(childNode.id);
+      },
       clusterNodeProperties: clusterNodeProperties
     });
 
-    // Mark as collapsed
     collapsedParentIds.current.add(parentId);
-  }, [data, getDirectChildren, collapsedParentIds]);
+  }, [getDirectChildren]);
 
-  // Auto-save function using ref
-  const autoSave = useCallback(() => {
-    saveDataToLocalStorage(data.nodes, data.edges, collapsedParentIds.current);
-  }, [data]);
+  // Recursively opens descendant clusters.
+  const recursiveOpenDescendants = useCallback((networkInstance, originalParentId) => {
+    const directChildren = getDirectChildren(originalParentId);
+    directChildren.forEach((childId) => {
+      const childNode = nodes.current.get(childId); 
+      if (childNode?.is_parent && collapsedParentIds.current.has(childId)) {
+        const innerClusterId = `cluster-${childId}`;
+        
+        // Check if cluster exists before trying to open it
+        try {
+          if (networkInstance.isCluster(innerClusterId)) {
+            networkInstance.openCluster(innerClusterId);
+            collapsedParentIds.current.delete(childId);
+          }
+        } catch (error) {
+          console.warn(`Cluster ${innerClusterId} does not exist or cannot be opened:`, error);
+          // Remove from collapsed set if cluster doesn't exist
+          collapsedParentIds.current.delete(childId);
+        }
+      }
+      recursiveOpenDescendants(networkInstance, childId);
+    });
+  }, [getDirectChildren]);
 
-  // --- USE EFFECT HOOKS ---
+  // Collapses all children of a root node
+  const collapseAllChildren = useCallback((networkInstance, parentId) => {
+    const directChildren = getDirectChildren(parentId);
+    
+    // First collapse all parent children individually
+    directChildren.forEach(childId => {
+      const childNode = nodes.current.get(childId);
+      if (childNode?.is_parent) {
+        collapseNode(networkInstance, childId);
+      }
+    });
+    
+    // Then collapse the parent itself if it has children
+    if (directChildren.length > 0) {
+      collapseNode(networkInstance, parentId);
+    }
+  }, [getDirectChildren, collapseNode]);
+
+  // Opens the modal for adding/editing nodes or notes.
+  const openModal = (mode, nodeId) => {
+    if (!nodeId) return;
+
+    const isCluster = String(nodeId).startsWith('cluster-');
+    const actualNodeId = isCluster ? String(nodeId).replace('cluster-', '') : nodeId;
+    const nodeData = nodes.current.get(actualNodeId);
+    
+    setModalState({
+      isOpen: true,
+      mode: mode,
+      nodeData: (mode === 'edit' || mode === 'note') ? nodeData : null,
+      parentId: (mode === 'add') ? actualNodeId : null,
+    });
+  };
+
+  // Closes the modal.
+  const closeModal = () => {
+    setModalState({ isOpen: false, mode: null, nodeData: null, parentId: null });
+  };
+
+  // Handles adding a new root node via modal.
+  const handleAddRootNode = () => {
+    setModalState({
+      isOpen: true,
+      mode: 'addRoot',
+      nodeData: null,
+      parentId: null
+    });
+  };
+
+  // Submits modal form data to Supabase and updates graph.
+  const handleModalSubmit = async (formData) => {
+    if (modalState.mode === 'add') {
+      const newNodeData = { 
+        id: Date.now(), 
+        label: formData.label, 
+        url: formData.url, 
+        note: formData.note, 
+        is_parent: formData.isParent, 
+        shape: formData.isParent ? 'ellipse' : 'box',
+        value: DEFAULT_NODE_VALUE
+      };
+      const savedNode = await addNodeToSupabase(newNodeData);
+      if (savedNode) {
+        const displayNode = { 
+          id: savedNode.id, 
+          label: savedNode.label, 
+          shape: savedNode.shape, 
+          value: savedNode.value || DEFAULT_NODE_VALUE,
+          is_parent: savedNode.is_parent,
+          url: savedNode.url,
+          note: savedNode.note,
+          title: generateNodeTitle(savedNode) 
+        };
+        nodes.current.add(displayNode);
+        
+        const savedEdge = await addEdgeToSupabase(modalState.parentId, savedNode.id);
+        if (savedEdge) {
+          edges.current.add({ id: savedEdge.id, from: savedEdge.from_node, to: savedEdge.to_node });
+        }
+        autoSave();
+      }
+    } else if (modalState.mode === 'addRoot') {
+      const newRootNode = { 
+        id: Date.now(), 
+        label: formData.label, 
+        url: formData.url, 
+        note: formData.note, 
+        is_parent: true, 
+        is_root: true, 
+        shape: 'circle', 
+        value: 25
+      };
+      const savedNode = await addNodeToSupabase(newRootNode);
+      if (savedNode) {
+        const displayNode = { 
+          id: savedNode.id, 
+          label: savedNode.label, 
+          shape: savedNode.shape, 
+          value: savedNode.value || 25,
+          is_parent: savedNode.is_parent,
+          is_root: savedNode.is_root,
+          url: savedNode.url,
+          note: savedNode.note,
+          title: generateNodeTitle(savedNode) 
+        };
+        nodes.current.add(displayNode);
+        setSelectedNodeId(savedNode.id);
+        autoSave();
+      }
+    } else if (modalState.mode === 'edit' || modalState.mode === 'note') {
+      const updatedNode = { ...modalState.nodeData, ...formData };
+      if (updatedNode.value === null || updatedNode.value === undefined) {
+        updatedNode.value = DEFAULT_NODE_VALUE;
+      }
+      await updateNodeInSupabase(updatedNode);
+      
+      // Ensure the updated node maintains all necessary properties
+      const fullUpdatedNode = {
+        ...updatedNode,
+        title: generateNodeTitle(updatedNode)
+      };
+      nodes.current.update(fullUpdatedNode);
+      autoSave();
+    }
+    closeModal();
+  };
+
+  // Adds a child node.
+  const handleAddNode = () => openModal('add', selectedNodeId);
+
+  // Edits a node.
+  const handleEditNode = () => openModal('edit', selectedNodeId);
+
+  // Adds or edits a note.
+  const handleAddEditNote = () => openModal('note', selectedNodeId);
+
+  // Deletes a node after confirmation, preventing root deletion.
+  const handleDeleteNode = async () => {
+    if (!selectedNodeId) return;
+
+    const rootNode = nodes.current.get({ filter: item => item.is_root === true })[0];
+    if (selectedNodeId === rootNode?.id) {
+        alert("The root node cannot be deleted.");
+        return;
+    }
+    
+    if (window.confirm("Are you sure you want to delete this node?")) {
+      await deleteNodeFromSupabase(selectedNodeId);
+      nodes.current.remove(selectedNodeId); 
+      setSelectedNodeId(null);
+      autoSave();
+    }
+  };
+
+  // --- UseEffect Hooks ---
+  // Sets up user session with Supabase, handling anonymous sign-in.
+  useEffect(() => {
+    const setupUserSession = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        await supabase.auth.signInAnonymously();
+      }
+    };
+
+    setupUserSession();
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session);
+      console.log("Supabase auth state changed:", session);
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
+
+  // Initializes the vis-network graph and handles events like selection and double-click.
   useEffect(() => {
     const options = getNetworkOptions(isDark);
-    const network = new Network(containerRef.current, data, options);
+    const network = new Network(
+      containerRef.current,
+      { nodes: nodes.current, edges: edges.current },
+      options
+    );
     networkRef.current = network;
 
-    data.nodes.on('*', autoSave);
-    data.edges.on('*', autoSave);
+    nodes.current.on('*', autoSave);
+    edges.current.on('*', autoSave);
 
     network.on("selectNode", (params) => setSelectedNodeId(params.nodes[0]));
     network.on("deselectNode", () => setSelectedNodeId(null));
@@ -560,49 +648,112 @@ export default function Graph() {
       const nodeId = params.nodes[0];
       if (!nodeId) return;
 
-      if (network.isCluster(nodeId) || String(nodeId).startsWith('cluster-')) {
+      const isClusterNode = network.isCluster(nodeId) || String(nodeId).startsWith('cluster-');
+      if (isClusterNode) {
         const clusterId = nodeId;
-        const parentId = parseInt(String(clusterId).replace('cluster-', ''));
+        const parentId = String(clusterId).replace('cluster-', ''); // Fixed: No parseInt, keep as string for UUIDs
         network.openCluster(clusterId);
         collapsedParentIds.current.delete(parentId);
-        // Recursively open descendants
         recursiveOpenDescendants(network, parentId);
         autoSave();
         return;
       }
 
-      const node = data.nodes.get(nodeId);
-      if (node?.url) {
+      const node = nodes.current.get(nodeId);
+      if (node?.url && node.url.trim() !== '') { // Fixed: Check for non-empty URL to open links
         window.open(node.url, "_blank");
-      } else if (node?.isParent) {
-        collapseNode(network, nodeId);
+      } else if (node?.is_parent) {
+        // Check if this is a root node - if so, collapse all children
+        const rootNode = nodes.current.get({ filter: item => item.is_root === true })[0];
+        if (nodeId === rootNode?.id) {
+          collapseAllChildren(network, nodeId);
+        } else {
+          collapseNode(network, nodeId);
+        }
         autoSave();
       }
     });
 
-    // Apply initial collapses in bottom-up order
+    // Apply initial collapses in bottom-up order if any.
     if (collapsedParentIds.current.size > 0) {
       const order = getBottomUpOrder(collapsedParentIds.current);
       order.forEach(parentId => {
         collapseNode(network, parentId);
       });
-      // Save after initial setup
-      autoSave();
     }
 
     return () => {
-      data.nodes.off('*', autoSave);
-      data.edges.off('*', autoSave);
+      nodes.current.off('*', autoSave);
+      edges.current.off('*', autoSave);
       network.destroy();
     };
-  }, [data, isDark, autoSave, collapseNode, recursiveOpenDescendants, getBottomUpOrder]); // Dependencies for callbacks
+  }, [isDark, collapseNode, recursiveOpenDescendants, getBottomUpOrder, autoSave, collapseAllChildren]);
 
+  // Loads graph data from Supabase when session changes, initializing root if empty.
   useEffect(() => {
-    if (networkRef.current) { const options = getNetworkOptions(isDark); networkRef.current.setOptions(options); }
+    if (session) {
+      const loadAndInitializeGraph = async () => {
+        const { nodes: fetchedNodes, edges: fetchedEdges } = await fetchGraphData();
+
+        if (fetchedNodes.length === 0) {
+          const rootNode = { 
+            id: Date.now(), 
+            label: "Root", 
+            is_parent: true, 
+            is_root: true, 
+            shape: "circle", 
+            value: 25, 
+            note: "Start here!" 
+          };
+          const savedRoot = await addNodeToSupabase(rootNode);
+          if (savedRoot) {
+              const displayNode = { 
+                id: savedRoot.id, 
+                label: savedRoot.label, 
+                shape: savedRoot.shape, 
+                value: savedRoot.value || 25,
+                is_parent: savedRoot.is_parent,
+                is_root: savedRoot.is_root,
+                url: savedRoot.url,
+                note: savedRoot.note,
+                title: generateNodeTitle(savedRoot) 
+              };
+              nodes.current.clear();
+              edges.current.clear();
+              nodes.current.add(displayNode);
+          }
+        } else {
+          const displayNodes = fetchedNodes.map(n => ({ 
+            id: n.id, 
+            label: n.label, 
+            shape: n.shape, 
+            value: n.value || DEFAULT_NODE_VALUE,
+            is_parent: n.is_parent,
+            url: n.url,
+            note: n.note,
+            title: generateNodeTitle(n) 
+          }));
+          nodes.current.clear();
+          edges.current.clear();
+          nodes.current.add(displayNodes);
+          edges.current.add(fetchedEdges);
+        }
+        autoSave(); // Save fetched data to local as backup
+      };
+      loadAndInitializeGraph();
+    }
+  }, [session, autoSave]);
+
+  // Updates network options when theme changes.
+  useEffect(() => {
+    if (networkRef.current) { 
+      const options = getNetworkOptions(isDark); 
+      networkRef.current.setOptions(options); 
+    }
   }, [isDark]);
 
-  const selectedNode = selectedNodeId ? data.nodes.get(selectedNodeId) : null;
-  const isClusterSelected = selectedNodeId && String(selectedNodeId).startsWith('cluster-');
+  // --- Render ---
+  const selectedNode = selectedNodeId ? nodes.current.get(selectedNodeId) : null;
 
   return (
     <GridBg isDark={isDark}>
@@ -615,11 +766,11 @@ export default function Graph() {
         gap: '10px', 
         zIndex: 1001 
       }}>
-        <LoginButton isDark={isDark} />
+        <LoginButton isDark={isDark} session={session} onAuthClick={handleLoginClick} />
         <ThemeToggle isDark={isDark} onToggle={() => setIsDark(!isDark)} />
       </div>
       <FixedToolbar
-        onAddRoot={handleAddRootNode} // Pass the new handler
+        onAddRoot={handleAddRootNode} 
         onAdd={handleAddNode}
         onDelete={handleDeleteNode}
         onEdit={handleEditNode}
@@ -634,7 +785,7 @@ export default function Graph() {
         onClose={closeModal}
         onSubmit={handleModalSubmit}
         initialData={modalState.nodeData}
-        mode={modalState.mode} // ✅ This will now include 'addRoot'
+        mode={modalState.mode} 
         isDark={isDark}
       />
 
