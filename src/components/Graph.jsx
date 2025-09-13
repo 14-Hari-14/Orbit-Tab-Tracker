@@ -5,7 +5,7 @@ import { GridBg } from './ui/GridBg';
 import HCaptcha from '@hcaptcha/react-hcaptcha';
 
 import {supabase} from './supabaseClient';
-import { fetchGraphData, addNodeToSupabase, addEdgeToSupabase, updateNodeInSupabase, deleteNodeFromSupabase } from './api'; 
+import { fetchGraphData, addNodeToSupabase, addEdgeToSupabase, updateNodeInSupabase, deleteNodeFromSupabase, saveCollapsedStateToSupabase, loadCollapsedStateFromSupabase } from './api'; 
 
 import { NodeModal } from "./NodeModal";
 import sunIcon from '../assets/sun.png';
@@ -16,13 +16,12 @@ const LOCAL_STORAGE_KEY = 'orbit-graph-data-v1';
 const DEFAULT_NODE_VALUE = 20; // New: Default value for node sizing to ensure visibility.
 
 // --- Utility Functions ---
-// Saves graph data (nodes, edges, collapsed IDs) to local storage for persistence.
-const saveDataToLocalStorage = (nodes, edges, collapsedIds) => {
+// Saves graph data (nodes, edges) to local storage for persistence.
+const saveDataToLocalStorage = (nodes, edges) => {
   try {
     const plainNodes = nodes.get({ returnType: 'Array' });
     const plainEdges = edges.get({ returnType: 'Array' });
-    const plainCollapsed = Array.from(collapsedIds);
-    const dataToStore = JSON.stringify({ nodes: plainNodes, edges: plainEdges, collapsed: plainCollapsed });
+    const dataToStore = JSON.stringify({ nodes: plainNodes, edges: plainEdges });
     localStorage.setItem(LOCAL_STORAGE_KEY, dataToStore);
   } catch (error) {
     console.error("Failed to save graph data:", error);
@@ -495,8 +494,7 @@ export default function Graph() {
   const captcha = useRef(null);
   const nodes = useRef(new DataSet([]));
   const edges = useRef(new DataSet([]));
-  const collapsedParentIds = useRef(new Set());
-
+  
   // State management for selection, theme, modal, and user session.
   const [selectedNodeId, setSelectedNodeId] = useState(null);
   const [isDark, setIsDark] = useState(true);
@@ -516,17 +514,33 @@ export default function Graph() {
     const loaded = loadDataFromLocalStorage();
     if (loaded) {
       nodes.current.clear();
-      nodes.current.add(loaded.nodes);
       edges.current.clear();
+      
+      // If we have collapsed data, we need to reconstruct the graph properly
+      // Load all nodes and edges normally - collapsed state is now in database
+      nodes.current.add(loaded.nodes);
       edges.current.add(loaded.edges);
-      collapsedParentIds.current = new Set(loaded.collapsed);
     }
   }, []);
 
   // --- Handler Functions ---
-  // Auto-saves graph data to local storage.
+  // Auto-saves graph data to local storage (collapsed state now in database).
   const autoSave = useCallback(() => {
-    saveDataToLocalStorage(nodes.current, edges.current, collapsedParentIds.current);
+    // Save to localStorage for immediate backup
+    saveDataToLocalStorage(nodes.current, edges.current);
+    // Note: collapsed state is now stored in database automatically via updateNodeInSupabase
+  }, []);
+
+  // Helper function to temporarily enable physics for layout adjustments
+  const enablePhysicsTemporarily = useCallback(() => {
+    if (networkRef.current) {
+      networkRef.current.setOptions({ physics: { enabled: true } });
+      setTimeout(() => {
+        if (networkRef.current) {
+          networkRef.current.setOptions({ physics: false });
+        }
+      }, 3000); // Allow 3 seconds for physics to settle
+    }
   }, []);
 
   // Initiates Google OAuth login via Supabase with CAPTCHA protection.
@@ -568,156 +582,245 @@ export default function Graph() {
     return edges.current.get({ filter: edge => edge.from === parentId }).map(edge => edge.to);
   }, []);
 
-  // Gets bottom-up order of collapsed nodes for initial setup.
-  const getBottomUpOrder = useCallback((collapsedSet) => {
-    const order = [];
-    const visited = new Set();
-
-    const visit = (id) => {
-      if (visited.has(id)) return;
-      visited.add(id);
-
-      const children = getDirectChildren(id).filter(c => collapsedSet.has(c));
-      children.forEach(visit);
-
-      order.push(id);
-    };
-
-    Array.from(collapsedSet).forEach(visit);
-    return order;
-  }, [getDirectChildren]);
-
-  // Collapses a parent node into a cluster, handling descendants recursively.
-  const collapseNode = useCallback((networkInstance, parentId) => {
-    if (collapsedParentIds.current.has(parentId)) return;
-
-    const node = nodes.current.get(parentId);
-    if (!node || !node.is_parent) return;
+  // 🔄 RECURSIVE COLLAPSE: Collapses a node and all its descendant parent nodes
+  const collapseNode = useCallback(async (parentId) => {
+    const parentNode = nodes.current.get(parentId);
+    if (!parentNode || !parentNode.is_parent || parentNode.is_collapsed) return;
     
-    const originalChildren = getDirectChildren(parentId);
-    if (originalChildren.length === 0) return;
-    
-    // Recursively collapse descendant parents.
-    const collapseDescendantParents = (nodeId) => {
-      const children = getDirectChildren(nodeId);
-      children.forEach(childId => {
-        const childNode = nodes.current.get(childId);
-        if (childNode && childNode.is_parent) {
-          if (!collapsedParentIds.current.has(childId)) {
-            collapseNode(networkInstance, childId);
-            collapsedParentIds.current.add(childId);
+    const directChildren = getDirectChildren(parentId);
+    if (directChildren.length === 0) return;
+
+    console.log(`🔄 Recursively collapsing node: ${parentNode.label}`);
+
+    // Get ALL descendants (children, grandchildren, etc.)
+    const getAllDescendants = (nodeId) => {
+      const result = new Set();
+      const queue = [nodeId];
+      
+      while (queue.length > 0) {
+        const currentId = queue.shift();
+        const children = getDirectChildren(currentId);
+        
+        children.forEach(childId => {
+          if (!result.has(childId)) {
+            result.add(childId);
+            queue.push(childId);
           }
-        }
-        collapseDescendantParents(childId);
-      });
+        });
+      }
+      
+      return Array.from(result);
     };
 
-    collapseDescendantParents(parentId);
+    const allDescendants = getAllDescendants(parentId);
+    
+    // 🔄 STEP 1: Recursively collapse all descendant parent nodes first
+    for (const descendantId of allDescendants) {
+      const descendantNode = nodes.current.get(descendantId);
+      if (descendantNode?.is_parent && !descendantNode?.is_collapsed) {
+        await collapseNode(descendantId); // Recursive call
+      }
+    }
 
-    const childCount = originalChildren.length;
-    const childReps = originalChildren.map(childId => 
-      collapsedParentIds.current.has(childId) ? `cluster-${childId}` : childId
-    );
+    // 🔄 STEP 2: Hide all descendants visually
+    try {
+      nodes.current.remove(allDescendants);
+      const descendantEdges = edges.current.get().filter(edge => 
+        allDescendants.includes(edge.from) || allDescendants.includes(edge.to) || edge.from === parentId
+      );
+      edges.current.remove(descendantEdges.map(e => e.id));
 
-    // Generates consistent random color for clusters.
-    const getRandomClusterColor = () => {
-      const colors = [
-        { bg: '#FF6B6B', border: '#FF5252', text: '#000000' },
-        { bg: '#4ECDC4', border: '#26A69A', text: '#000000' },
-        { bg: '#45B7D1', border: '#2196F3', text: '#000000' },
-        { bg: '#96CEB4', border: '#66BB6A', text: '#000000' },
-        { bg: '#FECA57', border: '#FF9800', text: '#000000' },
-        { bg: '#FF9FF3', border: '#E91E63', text: '#000000' },
-        { bg: '#A8E6CF', border: '#4CAF50', text: '#000000' },
-        { bg: '#FFB347', border: '#FF5722', text: '#000000' },
-        { bg: '#DDA0DD', border: '#9C27B0', text: '#000000' },
-        { bg: '#87CEEB', border: '#03A9F4', text: '#000000' },
-        { bg: '#F0E68C', border: '#CDDC39', text: '#000000' },
-        { bg: '#FFA07A', border: '#FF7043', text: '#000000' },
+      // 🔄 STEP 3: Update parent to collapsed cluster appearance
+      const clusterColors = [
+        { bg: '#FF6B6B', border: '#FF5252' },
+        { bg: '#4ECDC4', border: '#26A69A' },
+        { bg: '#45B7D1', border: '#2196F3' },
+        { bg: '#96CEB4', border: '#66BB6A' },
+        { bg: '#FECA57', border: '#FF9800' },
+        { bg: '#FF9FF3', border: '#E91E63' }
       ];
       
-      // Handle string parentId with a simple hash
       let hash = 0;
-      const strId = String(parentId);
-      for (let i = 0; i < strId.length; i++) {
-        hash = ((hash << 5) - hash + strId.charCodeAt(i)) | 0; // Simple hash function
+      String(parentId).split('').forEach(char => {
+        hash = ((hash << 5) - hash + char.charCodeAt(0)) | 0;
+      });
+      const color = clusterColors[Math.abs(hash) % clusterColors.length];
+
+      const clusteredParent = {
+        ...parentNode,
+        label: `${parentNode.label} (+${directChildren.length})`,
+        shape: 'circle',
+        color: { background: color.bg, border: color.border },
+        font: { color: '#000000' },
+        value: Math.max(parentNode.value || 25, directChildren.length * 5),
+        is_collapsed: true // Mark as collapsed
+      };
+      
+      clusteredParent.title = generateNodeTitle(clusteredParent);
+      nodes.current.update(clusteredParent);
+
+      // 🔄 STEP 4: Update database to mark as collapsed
+      if (session) {
+        await updateNodeInSupabase({ 
+          id: parentNode.id,
+          label: parentNode.label,
+          url: parentNode.url,
+          note: parentNode.note,
+          is_collapsed: true 
+        });
       }
-      const index = Math.abs(hash) % colors.length;
-      return colors[index];
-    };
-
-    const clusterColor = getRandomClusterColor();
-
-    const clusterNodeProperties = {
-      id: `cluster-${parentId}`,
-      label: `${node.label} (+${childCount})`,
-      note: node.note || '',
-      shape: 'circle',
-      value: childCount, // Already sets a value here for clusters.
-      color: { 
-        background: clusterColor.bg, 
-        border: clusterColor.border 
-      },
-      font: { color: '#000000' }
-    };
-  
-    clusterNodeProperties.title = generateNodeTitle(clusterNodeProperties);
-
-    networkInstance.cluster({
-      joinCondition: (childNode) => {
-        // Include the parent node itself
-        if (childNode.id === parentId) return true;
-        
-        // Include all direct children (both regular nodes and cluster representatives)
-        return originalChildren.includes(childNode.id) || childReps.includes(childNode.id);
-      },
-      clusterNodeProperties: clusterNodeProperties
-    });
-
-    collapsedParentIds.current.add(parentId);
-  }, [getDirectChildren]);
-
-  // Recursively opens descendant clusters.
-  const recursiveOpenDescendants = useCallback((networkInstance, originalParentId) => {
-    const directChildren = getDirectChildren(originalParentId);
-    directChildren.forEach((childId) => {
-      const childNode = nodes.current.get(childId); 
-      if (childNode?.is_parent && collapsedParentIds.current.has(childId)) {
-        const innerClusterId = `cluster-${childId}`;
-        
-        // Check if cluster exists before trying to open it
-        try {
-          if (networkInstance.isCluster(innerClusterId)) {
-            networkInstance.openCluster(innerClusterId);
-            collapsedParentIds.current.delete(childId);
-          }
-        } catch (error) {
-          console.warn(`Cluster ${innerClusterId} does not exist or cannot be opened:`, error);
-          // Remove from collapsed set if cluster doesn't exist
-          collapsedParentIds.current.delete(childId);
-        }
-      }
-      recursiveOpenDescendants(networkInstance, childId);
-    });
-  }, [getDirectChildren]);
-
-  // Collapses all children of a root node
-  const collapseAllChildren = useCallback((networkInstance, parentId) => {
-    const directChildren = getDirectChildren(parentId);
-    
-    // First collapse all parent children individually
-    directChildren.forEach(childId => {
-      const childNode = nodes.current.get(childId);
-      if (childNode?.is_parent) {
-        collapseNode(networkInstance, childId);
-      }
-    });
-    
-    // Then collapse the parent itself if it has children
-    if (directChildren.length > 0) {
-      collapseNode(networkInstance, parentId);
+      
+    } catch (error) {
+      console.error('Error collapsing node:', error);
     }
-  }, [getDirectChildren, collapseNode]);
+  }, [getDirectChildren, generateNodeTitle, session]);
+
+  // 📖 SHALLOW EXPAND: Expands a node to show direct children in their last known state
+  const expandNode = useCallback(async (parentId) => {
+    const parentNode = nodes.current.get(parentId);
+    if (!parentNode || !parentNode.is_collapsed) return;
+
+    console.log(`📖 Shallow expanding node: ${parentNode.label}`);
+
+    try {
+      // 📖 STEP 1: Get direct children from database (they might not be in current view)
+      const { nodes: allNodes, edges: allEdges } = await fetchGraphData();
+      const directChildren = allEdges
+        .filter(edge => edge.from === parentId)
+        .map(edge => allNodes.find(node => node.id === edge.to))
+        .filter(Boolean);
+
+      // 📖 STEP 2: Restore original parent appearance  
+      const restoredParent = {
+        ...parentNode,
+        label: parentNode.label.replace(/ \(\+\d+\)$/, ''), // Remove cluster count
+        shape: parentNode.shape || 'ellipse',
+        color: undefined, // Reset to default color
+        value: parentNode.value || 25,
+        is_collapsed: false
+      };
+      restoredParent.title = generateNodeTitle(restoredParent);
+      nodes.current.update(restoredParent);
+
+      // 📖 STEP 3: Add children back to view (in their database state)
+      if (directChildren.length > 0) {
+        const displayChildren = directChildren.map(child => ({
+          id: child.id,
+          label: child.label,
+          shape: child.shape,
+          value: child.value || DEFAULT_NODE_VALUE,
+          is_parent: child.is_parent,
+          is_collapsed: child.is_collapsed, // Preserve their collapsed state
+          url: child.url,
+          note: child.note,
+          title: generateNodeTitle(child)
+        }));
+
+        nodes.current.add(displayChildren);
+        
+        // Add edges back
+        const childEdgeIds = directChildren.map(child => child.id);
+        const childEdges = allEdges
+          .filter(edge => edge.from === parentId && childEdgeIds.includes(edge.to))
+          .map(edge => ({ id: edge.id, from: edge.from, to: edge.to }));
+        edges.current.add(childEdges);
+      }
+
+      // 📖 STEP 4: Update database to mark as expanded
+      if (session) {
+        await updateNodeInSupabase({ 
+          id: parentNode.id,
+          label: parentNode.label.replace(/ \(\+\d+\)$/, ''), // Remove cluster count
+          url: parentNode.url,
+          note: parentNode.note,
+          is_collapsed: false 
+        });
+      }
+
+      // Enable physics temporarily for layout
+      enablePhysicsTemporarily();
+
+    } catch (error) {
+      console.error('Error expanding node:', error);
+    }
+  }, [generateNodeTitle, enablePhysicsTemporarily, session, fetchGraphData]);
+
+  // Helper function to get all descendants from database data
+  const getDescendantsFromData = useCallback((parentId, allNodes, allEdges) => {
+    const descendants = new Set();
+    const queue = [parentId];
+    
+    while (queue.length > 0) {
+      const currentId = queue.shift();
+      const childEdges = allEdges.filter(edge => edge.from === currentId);
+      
+      childEdges.forEach(edge => {
+        const childId = edge.to;
+        if (!descendants.has(childId)) {
+          descendants.add(childId);
+          queue.push(childId);
+        }
+      });
+    }
+    
+    return Array.from(descendants);
+  }, []);
+
+  // 🔄 SYNC COLLAPSED STATE: Syncs current graph state with database state
+  const syncCollapsedStateFromDatabase = useCallback(async () => {
+    if (!session) return;
+
+    try {
+      console.log('🔄 Syncing collapsed state from database...');
+      const { nodes: dbNodes } = await fetchGraphData();
+      
+      // Create a map of database collapsed states
+      const dbCollapsedState = new Map();
+      dbNodes.forEach(node => {
+        if (node.is_parent) {
+          dbCollapsedState.set(node.id, node.is_collapsed);
+        }
+      });
+
+      // Compare current visual state with database state and sync
+      const currentNodes = nodes.current.get();
+      const nodesToCollapse = [];
+      const nodesToExpand = [];
+
+      currentNodes.forEach(node => {
+        if (node.is_parent && dbCollapsedState.has(node.id)) {
+          const dbIsCollapsed = dbCollapsedState.get(node.id);
+          const currentIsCollapsed = node.is_collapsed;
+
+          if (dbIsCollapsed && !currentIsCollapsed) {
+            // Database says collapsed, but visually expanded - collapse it
+            nodesToCollapse.push(node.id);
+          } else if (!dbIsCollapsed && currentIsCollapsed) {
+            // Database says expanded, but visually collapsed - expand it
+            nodesToExpand.push(node.id);
+          }
+        }
+      });
+
+      // Apply the sync operations
+      for (const nodeId of nodesToCollapse) {
+        console.log(`🔄 Syncing: Collapsing node ${nodeId} to match database`);
+        await collapseNode(nodeId);
+      }
+      
+      for (const nodeId of nodesToExpand) {
+        console.log(`🔄 Syncing: Expanding node ${nodeId} to match database`);
+        await expandNode(nodeId);
+      }
+
+      if (nodesToCollapse.length > 0 || nodesToExpand.length > 0) {
+        console.log(`🔄 Sync complete: ${nodesToCollapse.length} collapsed, ${nodesToExpand.length} expanded`);
+      }
+
+    } catch (error) {
+      console.error('Error syncing collapsed state:', error);
+    }
+  }, [session, fetchGraphData, collapseNode, expandNode]);
 
   // Opens the modal for adding/editing nodes or notes.
   const openModal = (mode, nodeId) => {
@@ -780,6 +883,9 @@ export default function Graph() {
         if (savedEdge) {
           edges.current.add({ id: savedEdge.id, from: savedEdge.from, to: savedEdge.to });
         }
+        
+        // Enable physics temporarily to allow proper layout
+        enablePhysicsTemporarily();
         autoSave();
       }
     } else if (modalState.mode === 'addRoot') {
@@ -808,6 +914,9 @@ export default function Graph() {
         };
         nodes.current.add(displayNode);
         setSelectedNodeId(savedNode.id);
+        
+        // Enable physics temporarily to allow proper layout
+        enablePhysicsTemporarily();
         autoSave();
       }
     } else if (modalState.mode === 'edit' || modalState.mode === 'note') {
@@ -906,7 +1015,7 @@ export default function Graph() {
   }, []);
 
   // Handles keyboard shortcuts.
-  const handleKeyDown = useCallback((event) => {
+  const handleKeyDown = useCallback(async (event) => {
     // Don't handle shortcuts when typing in input fields or modals are open
     if (event.target.tagName === 'INPUT' || 
         event.target.tagName === 'TEXTAREA' || 
@@ -1043,32 +1152,22 @@ export default function Graph() {
       if (!network) return;
 
       // Check if node is currently collapsed
-      if (collapsedParentIds.current.has(selectedNodeId)) {
-        // Open the cluster
-        const clusterId = `cluster-${selectedNodeId}`;
-        if (network.isCluster(clusterId)) {
-          network.openCluster(clusterId);
-          collapsedParentIds.current.delete(selectedNodeId);
-          recursiveOpenDescendants(network, selectedNodeId);
-          showKeyboardFeedback(`Expanded ${selectedNode.label}`, false);
-        }
+      if (selectedNode.is_collapsed) {
+        // Expand the node using our new approach (shallow expand)
+        await expandNode(selectedNodeId);
+        showKeyboardFeedback(`Expanded ${selectedNode.label}`, false);
       } else {
-        // Collapse the node
-        if (isRootNode) {
-          collapseAllChildren(network, selectedNodeId);
-          showKeyboardFeedback(`Collapsed all children of ${selectedNode.label}`, false);
-        } else {
-          collapseNode(network, selectedNodeId);
-          showKeyboardFeedback(`Collapsed ${selectedNode.label}`, false);
-        }
+        // Collapse the node (recursive collapse)
+        await collapseNode(selectedNodeId);
+        showKeyboardFeedback(`Collapsed ${selectedNode.label}`, false);
       }
       autoSave();
       return;
     }
 
   }, [selectedNodeId, modalState.isOpen, nodes, handleAddRootNode, handleAddNode, handleDeleteNode, 
-      handleEditNode, handleAddEditNote, getAllDescendants, networkRef, collapsedParentIds, recursiveOpenDescendants, 
-      collapseAllChildren, collapseNode, autoSave, showKeyboardFeedback]);
+      handleEditNode, handleAddEditNote, getAllDescendants, networkRef,
+      collapseNode, autoSave, showKeyboardFeedback, getDirectChildren]);
 
   // --- UseEffect Hooks ---
   // Sets up keyboard event listeners.
@@ -1115,56 +1214,105 @@ export default function Graph() {
     );
     networkRef.current = network;
 
+    // Add stabilization event handlers to reduce jitter
+    network.on("stabilizationProgress", function (params) {
+      // Optionally show loading indicator during stabilization
+    });
+
+    network.on("stabilizationIterationsDone", function () {
+      // Network has stabilized, physics can be turned off to prevent jitter
+      network.setOptions({ physics: false });
+    });
+
+    // Re-enable physics when nodes are added/moved
+    network.on("dragStart", function () {
+      network.setOptions({ physics: { enabled: true } });
+    });
+
+    network.on("dragEnd", function () {
+      // Allow physics to settle then disable again
+      setTimeout(() => {
+        network.setOptions({ physics: false });
+      }, 2000);
+    });
+
     nodes.current.on('*', autoSave);
     edges.current.on('*', autoSave);
 
     network.on("selectNode", (params) => setSelectedNodeId(params.nodes[0]));
     network.on("deselectNode", () => setSelectedNodeId(null));
 
-    network.on("doubleClick", (params) => {
+    network.on("doubleClick", async (params) => {
       const nodeId = params.nodes[0];
       if (!nodeId) return;
 
-      const isClusterNode = network.isCluster(nodeId) || String(nodeId).startsWith('cluster-');
-      if (isClusterNode) {
-        const clusterId = nodeId;
-        const parentId = String(clusterId).replace('cluster-', ''); // Fixed: No parseInt, keep as string for UUIDs
-        network.openCluster(clusterId);
-        collapsedParentIds.current.delete(parentId);
-        recursiveOpenDescendants(network, parentId);
-        autoSave();
+      const node = nodes.current.get(nodeId);
+      if (!node) return;
+
+      // Check if it's a URL node first
+      if (node.url && node.url.trim() !== '') {
+        window.open(node.url, "_blank");
         return;
       }
 
-      const node = nodes.current.get(nodeId);
-      if (node?.url && node.url.trim() !== '') { // Fixed: Check for non-empty URL to open links
-        window.open(node.url, "_blank");
-      } else if (node?.is_parent) {
-        // Check if this is a root node - if so, collapse all children
-        const rootNode = nodes.current.get({ filter: item => item.is_root === true })[0];
-        if (nodeId === rootNode?.id) {
-          collapseAllChildren(network, nodeId);
+      // Check if it's a parent node that can be collapsed/expanded
+      if (node.is_parent) {
+        if (node.is_collapsed) {
+          // It's collapsed, so expand it (shallow)
+          await expandNode(nodeId);
         } else {
-          collapseNode(network, nodeId);
+          // It's not collapsed, so collapse it (recursive)
+          await collapseNode(nodeId);
         }
         autoSave();
       }
     });
 
-    // Apply initial collapses in bottom-up order if any.
-    if (collapsedParentIds.current.size > 0) {
-      const order = getBottomUpOrder(collapsedParentIds.current);
-      order.forEach(parentId => {
-        collapseNode(network, parentId);
-      });
-    }
+    // Add visibility change handler to maintain cluster state
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        // Tab is hidden - disable physics
+        network.setOptions({ physics: false });
+      } else {
+        // Tab is visible again - sync state and briefly re-enable physics
+        setTimeout(async () => {
+          // Sync collapsed state from database in case another browser changed it
+          await syncCollapsedStateFromDatabase();
+          
+          network.setOptions({ physics: true });
+          // Disable physics again after stabilization
+          setTimeout(() => {
+            network.setOptions({ physics: false });
+          }, 2000);
+        }, 100);
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    // Also handle window focus events for additional safety
+    const handleWindowFocus = () => {
+      // When window regains focus, sync state and enable physics briefly
+      setTimeout(async () => {
+        await syncCollapsedStateFromDatabase();
+        
+        network.setOptions({ physics: true });
+        setTimeout(() => {
+          network.setOptions({ physics: false });
+        }, 2000);
+      }, 100);
+    };
+
+    window.addEventListener('focus', handleWindowFocus);
 
     return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('focus', handleWindowFocus);
       nodes.current.off('*', autoSave);
       edges.current.off('*', autoSave);
       network.destroy();
     };
-  }, [isDark, collapseNode, recursiveOpenDescendants, getBottomUpOrder, autoSave, collapseAllChildren]);
+  }, [isDark, collapseNode, autoSave, syncCollapsedStateFromDatabase]);
 
   // Loads graph data from Supabase when session changes, initializing root if empty.
   useEffect(() => {
@@ -1215,11 +1363,15 @@ export default function Graph() {
           nodes.current.add(displayNodes);
           edges.current.add(fetchedEdges);
         }
+        
+        // Sync collapsed state after loading data
+        await syncCollapsedStateFromDatabase();
+        
         autoSave(); // Save fetched data to local as backup
       };
       loadAndInitializeGraph();
     }
-  }, [session, autoSave]);
+  }, [session, autoSave, syncCollapsedStateFromDatabase]);
 
   // Updates network options when theme changes.
   useEffect(() => {

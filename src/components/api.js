@@ -117,13 +117,20 @@ export const addEdgeToSupabase = async (fromNodeId, toNodeId) => {
  * @param {object} node - The node object with updated fields (label, url, note).
  */
 export const updateNodeInSupabase = async (node) => {
+    const updateData = {
+        label: node.label,
+        url: node.url,
+        note: node.note,
+    };
+
+    // Include is_collapsed if it's provided
+    if (node.hasOwnProperty('is_collapsed')) {
+        updateData.is_collapsed = node.is_collapsed;
+    }
+
     const { error } = await supabase
         .from('nodes')
-        .update({
-            label: node.label,
-            url: node.url,
-            note: node.note,
-        })
+        .update(updateData)
         .eq('id', node.id); // Find the correct node by its unique ID
 
     if (error) console.error("Error updating node:", error);
@@ -152,4 +159,67 @@ export const deleteNodeFromSupabase = async (nodeId) => {
         .eq('id', nodeId);
 
     if (nodeError) console.error("Error deleting node:", nodeError);
+};
+
+/**
+ * Saves collapsed state to the database for cross-browser sync.
+ * @param {Map} collapsedState - Map of collapsed node data.
+ */
+export const saveCollapsedStateToSupabase = async (collapsedState) => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return; // Anonymous users use localStorage only
+
+    try {
+        // Convert Map to plain object for JSON storage
+        const collapsedObject = Object.fromEntries(collapsedState);
+
+        // Upsert (update or insert) user settings
+        const { error } = await supabase
+            .from('user_settings')
+            .upsert({
+                user_id: user.id,
+                collapsed_nodes: collapsedObject,
+                updated_at: new Date().toISOString()
+            }, {
+                onConflict: 'user_id'
+            });
+
+        if (error) {
+            console.error('Error saving collapsed state:', error);
+        }
+    } catch (error) {
+        console.error('Error saving collapsed state:', error);
+    }
+};
+
+/**
+ * Loads collapsed state from the database for cross-browser sync.
+ * @returns {Map} Map of collapsed node data.
+ */
+export const loadCollapsedStateFromSupabase = async () => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return new Map(); // Anonymous users use localStorage only
+
+    try {
+        const { data, error } = await supabase
+            .from('user_settings')
+            .select('collapsed_nodes')
+            .eq('user_id', user.id)
+            .single();
+
+        if (error && error.code !== 'PGRST116') { // PGRST116 = no rows returned
+            console.error('Error loading collapsed state:', error);
+            return new Map();
+        }
+
+        if (data && data.collapsed_nodes) {
+            // Convert plain object back to Map
+            return new Map(Object.entries(data.collapsed_nodes));
+        }
+
+        return new Map();
+    } catch (error) {
+        console.error('Error loading collapsed state:', error);
+        return new Map();
+    }
 };
