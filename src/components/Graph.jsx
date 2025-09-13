@@ -624,10 +624,12 @@ export default function Graph() {
 
     // 🔄 STEP 2: Hide all descendants visually
     try {
+      console.log(`🔄 Removing ${allDescendants.length} descendants:`, allDescendants);
       nodes.current.remove(allDescendants);
       const descendantEdges = edges.current.get().filter(edge => 
         allDescendants.includes(edge.from) || allDescendants.includes(edge.to) || edge.from === parentId
       );
+      console.log(`🔄 Removing ${descendantEdges.length} edges`);
       edges.current.remove(descendantEdges.map(e => e.id));
 
       // 🔄 STEP 3: Update parent to collapsed cluster appearance
@@ -695,15 +697,21 @@ export default function Graph() {
         ...parentNode,
         label: parentNode.label.replace(/ \(\+\d+\)$/, ''), // Remove cluster count
         shape: parentNode.shape || 'ellipse',
-        color: undefined, // Reset to default color
         value: parentNode.value || 25,
         is_collapsed: false
       };
+      
+      // Remove cluster-specific styling by deleting the properties
+      delete restoredParent.color;
+      delete restoredParent.font;
+      
       restoredParent.title = generateNodeTitle(restoredParent);
       nodes.current.update(restoredParent);
 
       // 📖 STEP 3: Add children back to view (in their database state)
       if (directChildren.length > 0) {
+        console.log(`📖 Found ${directChildren.length} direct children to expand:`, directChildren.map(c => c.label));
+        
         const displayChildren = directChildren.map(child => ({
           id: child.id,
           label: child.label,
@@ -716,14 +724,44 @@ export default function Graph() {
           title: generateNodeTitle(child)
         }));
 
-        nodes.current.add(displayChildren);
+        console.log(`📖 Adding display children:`, displayChildren.map(c => ({ id: c.id, label: c.label })));
+        
+        // Check if these nodes already exist in the current graph
+        const existingNodeIds = nodes.current.getIds();
+        const newChildren = displayChildren.filter(child => !existingNodeIds.includes(child.id));
+        const existingChildren = displayChildren.filter(child => existingNodeIds.includes(child.id));
+        
+        console.log(`📖 New children to add:`, newChildren.map(c => c.label));
+        console.log(`📖 Existing children to update:`, existingChildren.map(c => c.label));
+        
+        if (newChildren.length > 0) {
+          nodes.current.add(newChildren);
+        }
+        if (existingChildren.length > 0) {
+          nodes.current.update(existingChildren);
+        }
         
         // Add edges back
         const childEdgeIds = directChildren.map(child => child.id);
         const childEdges = allEdges
           .filter(edge => edge.from === parentId && childEdgeIds.includes(edge.to))
           .map(edge => ({ id: edge.id, from: edge.from, to: edge.to }));
-        edges.current.add(childEdges);
+          
+        console.log(`📖 Adding ${childEdges.length} edges back`);
+        
+        // Check if edges already exist
+        const existingEdgeIds = edges.current.getIds();
+        const newEdges = childEdges.filter(edge => !existingEdgeIds.includes(edge.id));
+        const existingEdges = childEdges.filter(edge => existingEdgeIds.includes(edge.id));
+        
+        if (newEdges.length > 0) {
+          edges.current.add(newEdges);
+        }
+        if (existingEdges.length > 0) {
+          edges.current.update(existingEdges);
+        }
+      } else {
+        console.log(`📖 No direct children found for node ${parentId}`);
       }
 
       // 📖 STEP 4: Update database to mark as expanded

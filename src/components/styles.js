@@ -28,6 +28,11 @@ export const getNetworkOptions = (isDark) => ({
                 background: isDark ? '#3d3d3d' : '#e6f3ff'
             }
         },
+        font: {
+            size: 14,
+            color: isDark ? '#ffffff' : '#000000',
+            face: 'Electrolize, sans-serif'
+        },
         shadow: {
             enabled: true,
             color: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.2)',
