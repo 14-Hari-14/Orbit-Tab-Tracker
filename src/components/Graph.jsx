@@ -7,6 +7,7 @@ import {supabase} from './supabaseClient';
 import { fetchGraphData, addNodeToSupabase, addEdgeToSupabase, updateNodeInSupabase, deleteNodeFromSupabase } from './api'; 
 
 import { NodeModal } from "./NodeModal";
+import FuzzySearch from "./FuzzySearch";
 import sunIcon from '../assets/sun.png';
 import moonIcon from '../assets/moon.png';
 
@@ -141,7 +142,7 @@ const ProjectHeader = ({ isDark }) => (
 );
 
 // Toolbar for graph actions like adding, editing, or deleting nodes.
-const FixedToolbar = ({ onAddRoot, onAdd, onDelete, onEdit, onNote, isNodeSelected, selectedNodeLabel, isDark }) => {
+const FixedToolbar = ({ onAddRoot, onAdd, onDelete, onEdit, onNote, onShowShortcuts, isNodeSelected, selectedNodeLabel, isDark }) => {
   const buttonStyle = { 
     padding: '10px 16px', 
     border: 'none', 
@@ -198,10 +199,10 @@ const FixedToolbar = ({ onAddRoot, onAdd, onDelete, onEdit, onNote, isNodeSelect
       
       <button 
         onClick={onDelete} 
-        disabled={!isNodeSelected || selectedNodeLabel === 'Root'} 
-        style={isNodeSelected && selectedNodeLabel !== 'Root' ? { ...buttonStyle, backgroundColor: '#dc3545' } : disabledButtonStyle} 
-        onMouseOver={(e) => isNodeSelected && selectedNodeLabel !== 'Root' && (e.currentTarget.style.backgroundColor = '#c82333')} 
-        onMouseOut={(e) => isNodeSelected && selectedNodeLabel !== 'Root' && (e.currentTarget.style.backgroundColor = '#dc3545')} 
+        disabled={!isNodeSelected} 
+        style={isNodeSelected ? { ...buttonStyle, backgroundColor: '#dc3545' } : disabledButtonStyle} 
+        onMouseOver={(e) => isNodeSelected && (e.currentTarget.style.backgroundColor = '#c82333')} 
+        onMouseOut={(e) => isNodeSelected && (e.currentTarget.style.backgroundColor = '#dc3545')} 
       > 
         <span>🗑️</span> Delete Node 
       </button> 
@@ -225,6 +226,16 @@ const FixedToolbar = ({ onAddRoot, onAdd, onDelete, onEdit, onNote, isNodeSelect
       > 
         <span>📝</span> Add/Edit Note 
       </button> 
+      
+      <button 
+        onClick={onShowShortcuts} 
+        style={{ ...buttonStyle, backgroundColor: '#6f42c1' }}
+        onMouseOver={(e) => (e.currentTarget.style.backgroundColor = '#5a2d91')} 
+        onMouseOut={(e) => (e.currentTarget.style.backgroundColor = '#6f42c1')} 
+        title="View keyboard shortcuts"
+      > 
+        <span>⌨️</span> Shortcuts 
+      </button>
       
       <div style={statusStyle}> 
         {isNodeSelected ? `Selected: ${selectedNodeLabel}` : 'Select a node to enable actions'} 
@@ -273,6 +284,210 @@ const LoginButton = ({ isDark, session, onAuthClick }) => {
   );
 };
 
+// Displays keyboard shortcut feedback messages.
+const KeyboardFeedback = ({ feedback, isDark }) => {
+  if (!feedback) return null;
+
+  const feedbackStyle = {
+    position: 'fixed',
+    top: '20px',
+    right: '20px',
+    padding: '12px 16px',
+    borderRadius: '8px',
+    fontSize: '14px',
+    fontWeight: '500',
+    zIndex: 9999,
+    boxShadow: isDark 
+      ? '0 4px 12px rgba(0, 0, 0, 0.5)' 
+      : '0 4px 12px rgba(0, 0, 0, 0.15)',
+    backgroundColor: feedback.isError 
+      ? (isDark ? '#dc3545' : '#f8d7da')
+      : (isDark ? '#28a745' : '#d4edda'),
+    color: feedback.isError
+      ? (isDark ? 'white' : '#721c24')
+      : (isDark ? 'white' : '#155724'),
+    border: feedback.isError
+      ? (isDark ? '1px solid #dc3545' : '1px solid #f5c6cb')
+      : (isDark ? '1px solid #28a745' : '1px solid #c3e6cb'),
+    animation: 'slideInRight 0.3s ease-out',
+  };
+
+  return (
+    <>
+      <style>
+        {`
+          @keyframes slideInRight {
+            from {
+              transform: translateX(100%);
+              opacity: 0;
+            }
+            to {
+              transform: translateX(0);
+              opacity: 1;
+            }
+          }
+        `}
+      </style>
+      <div style={feedbackStyle}>
+        {feedback.message}
+      </div>
+    </>
+  );
+};
+
+// Displays keyboard shortcuts reference modal.
+const KeyboardShortcutsModal = ({ isOpen, onClose, isDark }) => {
+  if (!isOpen) return null;
+
+  const overlayStyle = {
+    position: 'fixed',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 10000,
+  };
+
+  const modalStyle = {
+    backgroundColor: isDark ? '#2d3748' : '#ffffff',
+    color: isDark ? '#e2e8f0' : '#2d3748',
+    borderRadius: '12px',
+    padding: '24px',
+    maxWidth: '600px',
+    width: '90%',
+    maxHeight: '80vh',
+    overflow: 'auto',
+    boxShadow: isDark 
+      ? '0 20px 25px -5px rgba(0, 0, 0, 0.8)' 
+      : '0 20px 25px -5px rgba(0, 0, 0, 0.3)',
+    border: isDark ? '1px solid #4a5568' : '1px solid #e2e8f0',
+  };
+
+  const headerStyle = {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: '20px',
+    borderBottom: isDark ? '1px solid #4a5568' : '1px solid #e2e8f0',
+    paddingBottom: '12px',
+  };
+
+  const titleStyle = {
+    fontSize: '20px',
+    fontWeight: '600',
+    margin: 0,
+  };
+
+  const closeButtonStyle = {
+    background: 'none',
+    border: 'none',
+    fontSize: '24px',
+    cursor: 'pointer',
+    color: isDark ? '#a0aec0' : '#718096',
+    padding: '4px',
+    borderRadius: '4px',
+    transition: 'color 0.2s ease',
+  };
+
+  const sectionStyle = {
+    marginBottom: '20px',
+  };
+
+  const sectionTitleStyle = {
+    fontSize: '16px',
+    fontWeight: '600',
+    marginBottom: '12px',
+    color: isDark ? '#63b3ed' : '#3182ce',
+  };
+
+  const shortcutRowStyle = {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: '8px 0',
+    borderBottom: isDark ? '1px solid #4a5568' : '1px solid #f7fafc',
+  };
+
+  const keyStyle = {
+    backgroundColor: isDark ? '#4a5568' : '#f7fafc',
+    color: isDark ? '#e2e8f0' : '#2d3748',
+    padding: '4px 8px',
+    borderRadius: '4px',
+    fontSize: '12px',
+    fontWeight: '600',
+    fontFamily: 'monospace',
+    border: isDark ? '1px solid #718096' : '1px solid #e2e8f0',
+  };
+
+  const shortcuts = [
+    {
+      category: 'Node Management',
+      items: [
+        { key: 'Ctrl+Q', description: 'Add new root node' },
+        { key: 'Ctrl+A', description: 'Add child node to selected parent' },
+        { key: 'Insert', description: 'Add child node (alternative)' },
+        { key: 'Delete / Backspace', description: 'Delete selected node' },
+        { key: 'Enter / F2', description: 'Edit selected node' },
+        { key: 'Ctrl+E', description: 'Edit note for selected node' },
+      ]
+    },
+    {
+      category: 'Navigation & Interaction',
+      items: [
+        { key: 'Ctrl+K', description: 'Open fuzzy search' },
+        { key: 'Ctrl+O', description: 'Open URL of selected node in new tab' },
+        { key: 'Escape', description: 'Clear node selection' },
+        { key: 'Space', description: 'Toggle collapse/expand for selected parent node' },
+      ]
+    }
+  ];
+
+  return (
+    <div style={overlayStyle} onClick={onClose}>
+      <div style={modalStyle} onClick={(e) => e.stopPropagation()}>
+        <div style={headerStyle}>
+          <h2 style={titleStyle}>⌨️ Keyboard Shortcuts</h2>
+          <button 
+            style={closeButtonStyle} 
+            onClick={onClose}
+            onMouseOver={(e) => e.target.style.color = isDark ? '#e2e8f0' : '#2d3748'}
+            onMouseOut={(e) => e.target.style.color = isDark ? '#a0aec0' : '#718096'}
+          >
+            ×
+          </button>
+        </div>
+        
+        {shortcuts.map((section, index) => (
+          <div key={index} style={sectionStyle}>
+            <h3 style={sectionTitleStyle}>{section.category}</h3>
+            {section.items.map((shortcut, itemIndex) => (
+              <div key={itemIndex} style={shortcutRowStyle}>
+                <span>{shortcut.description}</span>
+                <kbd style={keyStyle}>{shortcut.key}</kbd>
+              </div>
+            ))}
+          </div>
+        ))}
+        
+        <div style={{ 
+          marginTop: '20px', 
+          padding: '12px', 
+          backgroundColor: isDark ? '#4a5568' : '#f7fafc',
+          borderRadius: '6px',
+          fontSize: '12px',
+          color: isDark ? '#a0aec0' : '#718096'
+        }}>
+          <strong>Note:</strong> Shortcuts are disabled when typing in input fields or when modals are open.
+        </div>
+      </div>
+    </div>
+  );
+};
+
 // --- Main Graph Component ---
 export default function Graph() {
   // Refs for graph data and network instance.
@@ -292,6 +507,9 @@ export default function Graph() {
     parentId: null
   });
   const [session, setSession] = useState(null);
+  const [keyboardFeedback, setKeyboardFeedback] = useState(null);
+  const [showKeyboardShortcuts, setShowKeyboardShortcuts] = useState(false);
+  const [showFuzzySearch, setShowFuzzySearch] = useState(false);
 
   useEffect(() => {
     const loaded = loadDataFromLocalStorage();
@@ -590,25 +808,283 @@ export default function Graph() {
   // Adds or edits a note.
   const handleAddEditNote = () => openModal('note', selectedNodeId);
 
+  // Recursively gets all descendant nodes of a parent node.
+  const getAllDescendants = useCallback((nodeId) => {
+    const descendants = [];
+    const visited = new Set();
+
+    const collectDescendants = (currentNodeId) => {
+      if (visited.has(currentNodeId)) return;
+      visited.add(currentNodeId);
+
+      const children = getDirectChildren(currentNodeId);
+      children.forEach(childId => {
+        descendants.push(childId);
+        collectDescendants(childId);
+      });
+    };
+
+    collectDescendants(nodeId);
+    return descendants;
+  }, [getDirectChildren]);
+
   // Deletes a node after confirmation, preventing root deletion.
   const handleDeleteNode = async () => {
     if (!selectedNodeId) return;
 
-    const rootNode = nodes.current.get({ filter: item => item.is_root === true })[0];
-    if (selectedNodeId === rootNode?.id) {
-        alert("The root node cannot be deleted.");
-        return;
+    const selectedNode = nodes.current.get(selectedNodeId);
+    const descendants = getAllDescendants(selectedNodeId);
+    const totalNodesToDelete = descendants.length + 1; // +1 for the selected node itself
+    const isRootNode = selectedNode?.is_root === true;
+
+    let confirmMessage;
+    if (isRootNode && descendants.length > 0) {
+      confirmMessage = `Are you sure you want to delete the root node "${selectedNode.label}" and all its ${descendants.length} descendant node(s)? This will delete ${totalNodesToDelete} nodes total and cannot be undone. You can create a new root node later if needed.`;
+    } else if (isRootNode) {
+      confirmMessage = `Are you sure you want to delete the root node "${selectedNode.label}"? This cannot be undone. You can create a new root node later if needed.`;
+    } else if (descendants.length > 0) {
+      confirmMessage = `Are you sure you want to delete "${selectedNode.label}" and all its ${descendants.length} descendant node(s)? This will delete ${totalNodesToDelete} nodes total and cannot be undone.`;
+    } else {
+      confirmMessage = `Are you sure you want to delete "${selectedNode.label}"? This cannot be undone.`;
     }
     
-    if (window.confirm("Are you sure you want to delete this node?")) {
-      await deleteNodeFromSupabase(selectedNodeId);
-      nodes.current.remove(selectedNodeId); 
-      setSelectedNodeId(null);
-      autoSave();
+    if (window.confirm(confirmMessage)) {
+      try {
+        // Delete all descendants first (bottom-up)
+        for (const descendantId of descendants.reverse()) {
+          await deleteNodeFromSupabase(descendantId);
+          nodes.current.remove(descendantId);
+        }
+        
+        // Finally delete the selected node
+        await deleteNodeFromSupabase(selectedNodeId);
+        nodes.current.remove(selectedNodeId); 
+        setSelectedNodeId(null);
+        autoSave();
+
+        showKeyboardFeedback(`Deleted ${totalNodesToDelete} node(s)`, false);
+      } catch (error) {
+        console.error("Error deleting nodes:", error);
+        showKeyboardFeedback("Error deleting nodes", true);
+      }
     }
   };
 
+  // Shows brief feedback message for keyboard actions.
+  const showKeyboardFeedback = useCallback((message, isError = false) => {
+    setKeyboardFeedback({ message, isError });
+    setTimeout(() => setKeyboardFeedback(null), 2000);
+  }, []);
+
+  // Handle fuzzy search node selection
+  const handleFuzzySearchSelectNode = useCallback((nodeId) => {
+    setSelectedNodeId(nodeId);
+    if (networkRef.current) {
+      networkRef.current.selectNodes([nodeId]);
+      networkRef.current.focus(nodeId, {
+        scale: 1.0,
+        animation: {
+          duration: 1000,
+          easingFunction: 'easeInOutQuart'
+        }
+      });
+    }
+    showKeyboardFeedback(`Selected node: ${nodes.current.get(nodeId)?.label}`, false);
+  }, [showKeyboardFeedback]);
+
+  // Handle fuzzy search node edit
+  const handleFuzzySearchEditNode = useCallback((nodeId) => {
+    setSelectedNodeId(nodeId);
+    openModal('edit', nodeId);
+  }, []);
+
+  // Handle fuzzy search URL open
+  const handleFuzzySearchOpenUrl = useCallback((url) => {
+    window.open(url, "_blank");
+    showKeyboardFeedback(`Opened ${url}`, false);
+  }, [showKeyboardFeedback]);
+
+  // Handles keyboard shortcuts.
+  const handleKeyDown = useCallback((event) => {
+    // Don't handle shortcuts when typing in input fields or modals are open
+    if (event.target.tagName === 'INPUT' || 
+        event.target.tagName === 'TEXTAREA' || 
+        event.target.contentEditable === 'true' ||
+        modalState.isOpen ||
+        showFuzzySearch) {
+      return;
+    }
+
+    const { key, ctrlKey, shiftKey, altKey, metaKey } = event;
+    const selectedNode = selectedNodeId ? nodes.current.get(selectedNodeId) : null;
+    const isRootNode = selectedNode?.is_root === true;
+
+    // Prevent default for our custom shortcuts
+    const preventDefault = () => {
+      event.preventDefault();
+      event.stopPropagation();
+    };
+
+    // Ctrl+K: Open fuzzy search (placeholder for now)
+    if (ctrlKey && key === 'k') {
+      preventDefault();
+      setShowFuzzySearch(true);
+      showKeyboardFeedback("Opening fuzzy search", false);
+      return;
+    }
+
+    // Ctrl+R: Add root node
+    if (ctrlKey && key === 'q') {
+      preventDefault();
+      handleAddRootNode();
+      showKeyboardFeedback("Adding new root node", false);
+      return;
+    }
+
+    // Ctrl+A: Add child node (when node is selected)
+    if (ctrlKey && key === 'a') {
+      preventDefault();
+      if (!selectedNodeId) {
+        showKeyboardFeedback("Select a node first", true);
+        return;
+      }
+      if (!selectedNode?.is_parent) {
+        showKeyboardFeedback("Selected node cannot have children", true);
+        return;
+      }
+      handleAddNode();
+      showKeyboardFeedback(`Adding child to ${selectedNode.label}`, false);
+      return;
+    }
+
+    // Insert: Add child node (alternative)
+    if (key === 'Insert') {
+      preventDefault();
+      if (!selectedNodeId) {
+        showKeyboardFeedback("Select a node first", true);
+        return;
+      }
+      if (!selectedNode?.is_parent) {
+        showKeyboardFeedback("Selected node cannot have children", true);
+        return;
+      }
+      handleAddNode();
+      showKeyboardFeedback(`Adding child to ${selectedNode.label}`, false);
+      return;
+    }
+
+    // Delete or Backspace: Delete selected node
+    if (key === 'Delete' || key === 'Backspace') {
+      preventDefault();
+      if (!selectedNodeId) {
+        showKeyboardFeedback("No node selected", true);
+        return;
+      }
+      handleDeleteNode();
+      return;
+    }
+
+    // Enter or F2: Edit selected node
+    if (key === 'Enter' || key === 'F2') {
+      preventDefault();
+      if (!selectedNodeId) {
+        showKeyboardFeedback("Select a node to edit", true);
+        return;
+      }
+      handleEditNode();
+      showKeyboardFeedback(`Editing ${selectedNode.label}`, false);
+      return;
+    }
+
+    // Ctrl+E: Edit note
+    if (ctrlKey && key === 'e') {
+      preventDefault();
+      if (!selectedNodeId) {
+        showKeyboardFeedback("Select a node to edit note", true);
+        return;
+      }
+      handleAddEditNote();
+      showKeyboardFeedback(`Editing note for ${selectedNode.label}`, false);
+      return;
+    }
+
+    // Ctrl+O: Open URL in new tab
+    if (ctrlKey && key === 'o') {
+      preventDefault();
+      if (!selectedNodeId) {
+        showKeyboardFeedback("Select a node to open URL", true);
+        return;
+      }
+      if (!selectedNode?.url || selectedNode.url.trim() === '') {
+        showKeyboardFeedback("Selected node has no URL", true);
+        return;
+      }
+      window.open(selectedNode.url, "_blank");
+      showKeyboardFeedback(`Opened ${selectedNode.url}`, false);
+      return;
+    }
+
+    // Escape: Clear selection
+    if (key === 'Escape') {
+      preventDefault();
+      if (selectedNodeId) {
+        setSelectedNodeId(null);
+        networkRef.current?.unselectAll();
+        showKeyboardFeedback("Selection cleared", false);
+      }
+      return;
+    }
+
+    // Space: Toggle collapse/expand for parent nodes
+    if (key === ' ') {
+      preventDefault();
+      if (!selectedNodeId) {
+        showKeyboardFeedback("Select a parent node to toggle", true);
+        return;
+      }
+      if (!selectedNode?.is_parent) {
+        showKeyboardFeedback("Selected node is not a parent", true);
+        return;
+      }
+      
+      const network = networkRef.current;
+      if (!network) return;
+
+      // Check if node is currently collapsed
+      if (collapsedParentIds.current.has(selectedNodeId)) {
+        // Open the cluster
+        const clusterId = `cluster-${selectedNodeId}`;
+        if (network.isCluster(clusterId)) {
+          network.openCluster(clusterId);
+          collapsedParentIds.current.delete(selectedNodeId);
+          recursiveOpenDescendants(network, selectedNodeId);
+          showKeyboardFeedback(`Expanded ${selectedNode.label}`, false);
+        }
+      } else {
+        // Collapse the node
+        if (isRootNode) {
+          collapseAllChildren(network, selectedNodeId);
+          showKeyboardFeedback(`Collapsed all children of ${selectedNode.label}`, false);
+        } else {
+          collapseNode(network, selectedNodeId);
+          showKeyboardFeedback(`Collapsed ${selectedNode.label}`, false);
+        }
+      }
+      autoSave();
+      return;
+    }
+
+  }, [selectedNodeId, modalState.isOpen, showFuzzySearch, nodes, handleAddRootNode, handleAddNode, handleDeleteNode, 
+      handleEditNode, handleAddEditNote, getAllDescendants, networkRef, collapsedParentIds, recursiveOpenDescendants, 
+      collapseAllChildren, collapseNode, autoSave, showKeyboardFeedback]);
+
   // --- UseEffect Hooks ---
+  // Sets up keyboard event listeners.
+  useEffect(() => {
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [handleKeyDown]);
+
   // Sets up user session with Supabase, handling anonymous sign-in.
   useEffect(() => {
     const setupUserSession = async () => {
@@ -775,6 +1251,7 @@ export default function Graph() {
         onDelete={handleDeleteNode}
         onEdit={handleEditNode}
         onNote={handleAddEditNote}
+        onShowShortcuts={() => setShowKeyboardShortcuts(true)}
         isNodeSelected={!!selectedNodeId}
         selectedNodeLabel={selectedNode?.label || ''}
         isDark={isDark}
@@ -788,6 +1265,24 @@ export default function Graph() {
         mode={modalState.mode} 
         isDark={isDark}
       />
+
+      <KeyboardShortcutsModal 
+        isOpen={showKeyboardShortcuts}
+        onClose={() => setShowKeyboardShortcuts(false)}
+        isDark={isDark}
+      />
+
+      <FuzzySearch
+        isOpen={showFuzzySearch}
+        onClose={() => setShowFuzzySearch(false)}
+        nodes={nodes.current.get()}
+        onSelectNode={handleFuzzySearchSelectNode}
+        onEditNode={handleFuzzySearchEditNode}
+        onOpenUrl={handleFuzzySearchOpenUrl}
+        isDark={isDark}
+      />
+
+      <KeyboardFeedback feedback={keyboardFeedback} isDark={isDark} />
 
       <div
         ref={containerRef}
