@@ -680,17 +680,25 @@ export default function Graph() {
   // 📖 SHALLOW EXPAND: Expands a node to show direct children in their last known state
   const expandNode = useCallback(async (parentId) => {
     const parentNode = nodes.current.get(parentId);
-    if (!parentNode || !parentNode.is_collapsed) return;
+    if (!parentNode || !parentNode.is_collapsed) {
+      console.log(`📖 Expand rejected: parentNode exists: ${!!parentNode}, is_collapsed: ${parentNode?.is_collapsed}`);
+      return;
+    }
 
     console.log(`📖 Shallow expanding node: ${parentNode.label}`);
 
     try {
       // 📖 STEP 1: Get direct children from database (they might not be in current view)
       const { nodes: allNodes, edges: allEdges } = await fetchGraphData();
+      console.log(`📖 Fetched ${allNodes.length} nodes and ${allEdges.length} edges from database`);
+      
       const directChildren = allEdges
         .filter(edge => edge.from === parentId)
         .map(edge => allNodes.find(node => node.id === edge.to))
         .filter(Boolean);
+        
+      console.log(`📖 Found direct children edges:`, allEdges.filter(edge => edge.from === parentId));
+      console.log(`📖 Direct children nodes:`, directChildren);
 
       // 📖 STEP 2: Restore original parent appearance  
       const restoredParent = {
@@ -698,12 +706,16 @@ export default function Graph() {
         label: parentNode.label.replace(/ \(\+\d+\)$/, ''), // Remove cluster count
         shape: parentNode.shape || 'ellipse',
         value: parentNode.value || 25,
-        is_collapsed: false
+        is_collapsed: false,
+        color: {
+          border: isDark ? '#888' : '#cccccc',
+          background: isDark ? '#2a2a2a' : '#ffffff'
+        },
+        font: {
+          size: 14,
+          color: isDark ? '#ffffff' : '#000000'
+        }
       };
-      
-      // Remove cluster-specific styling by deleting the properties
-      delete restoredParent.color;
-      delete restoredParent.font;
       
       restoredParent.title = generateNodeTitle(restoredParent);
       nodes.current.update(restoredParent);
@@ -1282,13 +1294,26 @@ export default function Graph() {
 
     network.on("doubleClick", async (params) => {
       const nodeId = params.nodes[0];
+      console.log(`🔄 Double-click detected on node: ${nodeId}`);
       if (!nodeId) return;
 
       const node = nodes.current.get(nodeId);
-      if (!node) return;
+      if (!node) {
+        console.log(`🔄 Node not found: ${nodeId}`);
+        return;
+      }
+
+      console.log(`🔄 Node details:`, { 
+        id: node.id, 
+        label: node.label, 
+        is_parent: node.is_parent, 
+        is_collapsed: node.is_collapsed,
+        url: node.url 
+      });
 
       // Check if it's a URL node first
       if (node.url && node.url.trim() !== '') {
+        console.log(`🔄 Opening URL: ${node.url}`);
         window.open(node.url, "_blank");
         return;
       }
@@ -1296,13 +1321,17 @@ export default function Graph() {
       // Check if it's a parent node that can be collapsed/expanded
       if (node.is_parent) {
         if (node.is_collapsed) {
+          console.log(`🔄 Expanding collapsed node: ${node.label}`);
           // It's collapsed, so expand it (shallow)
           await expandNode(nodeId);
         } else {
+          console.log(`🔄 Collapsing expanded node: ${node.label}`);
           // It's not collapsed, so collapse it (recursive)
           await collapseNode(nodeId);
         }
         autoSave();
+      } else {
+        console.log(`🔄 Node is not a parent, no action taken`);
       }
     });
 
