@@ -841,84 +841,59 @@ export default function Graph() {
 
   // 🔄 SYNC COLLAPSED STATE: Syncs current graph state with database state
   const syncCollapsedStateFromDatabase = useCallback(async () => {
-    if (!session) return; // Only sync for logged-in users
-    
-    console.log('🔄 Checking for collapsed state changes...');
-    
+    if (!session) return;
+
     try {
-      // Fetch latest collapsed state from database
+      console.log('🔄 Syncing collapsed state from database...');
       const { nodes: dbNodes } = await fetchGraphData();
-      const dbCollapsedNodes = dbNodes.filter(node => node.is_collapsed);
-      const dbCollapsedIds = new Set(dbCollapsedNodes.map(node => node.id));
       
-      // Get currently collapsed nodes in the visual graph
-      const currentNodes = nodes.current.get();
-      const currentCollapsedIds = new Set();
-      
-      // Check which nodes are currently collapsed in the visual graph
-      currentNodes.forEach(node => {
-        // A node is visually collapsed if it's a cluster or if we can't see its children
-        if (String(node.id).startsWith('cluster-')) {
-          const originalId = parseInt(String(node.id).replace('cluster-', ''));
-          currentCollapsedIds.add(originalId);
+      // Create a map of database collapsed states
+      const dbCollapsedState = new Map();
+      dbNodes.forEach(node => {
+        if (node.is_parent) {
+          dbCollapsedState.set(node.id, node.is_collapsed);
         }
       });
-      
-      // Find differences
-      const toCollapse = [];
-      const toExpand = [];
-      
-      // Check database collapsed state vs visual state
-      for (const nodeId of dbCollapsedIds) {
-        if (!currentCollapsedIds.has(nodeId)) {
-          // Database says collapsed, but visually expanded
-          const nodeExists = currentNodes.find(n => n.id === nodeId);
-          if (nodeExists && allNodesRef.current.get(nodeId)?.is_parent) {
-            toCollapse.push(nodeId);
+
+      // Compare current visual state with database state and sync
+      const currentNodes = nodes.current.get();
+      const nodesToCollapse = [];
+      const nodesToExpand = [];
+
+      currentNodes.forEach(node => {
+        if (node.is_parent && dbCollapsedState.has(node.id)) {
+          const dbIsCollapsed = dbCollapsedState.get(node.id);
+          const currentIsCollapsed = node.is_collapsed;
+
+          if (dbIsCollapsed && !currentIsCollapsed) {
+            // Database says collapsed, but visually expanded - collapse it
+            nodesToCollapse.push(node.id);
+          } else if (!dbIsCollapsed && currentIsCollapsed) {
+            // Database says expanded, but visually collapsed - expand it
+            nodesToExpand.push(node.id);
           }
         }
+      });
+
+      // Apply the sync operations
+      for (const nodeId of nodesToCollapse) {
+        console.log(`🔄 Syncing: Collapsing node ${nodeId} to match database`);
+        await collapseNode(nodeId);
       }
       
-      // Check visual collapsed state vs database state
-      for (const nodeId of currentCollapsedIds) {
-        if (!dbCollapsedIds.has(nodeId)) {
-          // Visually collapsed, but database says expanded
-          toExpand.push(nodeId);
-        }
+      for (const nodeId of nodesToExpand) {
+        console.log(`🔄 Syncing: Expanding node ${nodeId} to match database`);
+        await expandNode(nodeId);
       }
-      
-      console.log(`🔄 Sync plan: ${toCollapse.length} to collapse, ${toExpand.length} to expand`);
-      
-      // Only sync if there are actual differences AND user is not actively interacting
-      if (toCollapse.length === 0 && toExpand.length === 0) {
-        console.log('✅ No sync needed - states match');
-        return;
+
+      if (nodesToCollapse.length > 0 || nodesToExpand.length > 0) {
+        console.log(`🔄 Sync complete: ${nodesToCollapse.length} collapsed, ${nodesToExpand.length} expanded`);
       }
-      
-      // Add a small delay to avoid conflicts with user interactions
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      
-      // Apply changes
-      for (const nodeId of toCollapse) {
-        const nodeData = allNodesRef.current.get(nodeId);
-        if (nodeData && nodeData.is_parent) {
-          console.log(`🔒 Syncing collapse: ${nodeData.label}`);
-          await collapseNode(nodeId);
-        }
-      }
-      
-      for (const nodeId of toExpand) {
-        const nodeData = allNodesRef.current.get(nodeId);
-        if (nodeData && nodeData.is_parent) {
-          console.log(`🔓 Syncing expand: ${nodeData.label}`);
-          await expandNode(nodeId);
-        }
-      }
-      
+
     } catch (error) {
       console.error('Error syncing collapsed state:', error);
     }
-  }, [session, nodes, allNodesRef, collapseNode, expandNode]);
+  }, [session, fetchGraphData, collapseNode, expandNode]);
 
   // Opens the modal for adding/editing nodes or notes.
   const openModal = (mode, nodeId) => {
@@ -1511,51 +1486,50 @@ Would you like to expand these clusters to reveal the node?`;
     });
 
     // Add visibility change handler to maintain cluster state
-    let syncTimeout;
-    
     const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible' && session) {
-        console.log('👁️ Tab became visible, scheduling sync check...');
-        
-        // Clear any existing timeout
-        if (syncTimeout) {
-          clearTimeout(syncTimeout);
-        }
-        
-        // Wait a bit longer before syncing to avoid conflicts
-        syncTimeout = setTimeout(() => {
-          syncCollapsedStateFromDatabase();
-        }, 2000); // Increased delay
-      }
-    };
-
-    const handleWindowFocus = () => {
-      if (session) {
-        console.log('🎯 Window focused, scheduling sync check...');
-        
-        // Clear any existing timeout
-        if (syncTimeout) {
-          clearTimeout(syncTimeout);
-        }
-        
-        // Wait even longer for window focus to avoid aggressive syncing
-        syncTimeout = setTimeout(() => {
-          syncCollapsedStateFromDatabase();
-        }, 3000); // Even longer delay
+      if (document.hidden) {
+        // Tab is hidden - disable physics
+        network.setOptions({ physics: false });
+      } else {
+        // Tab is visible again - sync state and briefly re-enable physics
+        setTimeout(async () => {
+          // Sync collapsed state from database in case another browser changed it
+          await syncCollapsedStateFromDatabase();
+          
+          network.setOptions({ physics: true });
+          // Disable physics again after stabilization
+          setTimeout(() => {
+            network.setOptions({ physics: false });
+          }, 2000);
+        }, 100);
       }
     };
 
     document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    // Also handle window focus events for additional safety
+    const handleWindowFocus = () => {
+      // When window regains focus, sync state and enable physics briefly
+      setTimeout(async () => {
+        await syncCollapsedStateFromDatabase();
+        
+        network.setOptions({ physics: true });
+        setTimeout(() => {
+          network.setOptions({ physics: false });
+        }, 2000);
+      }, 100);
+    };
+
     window.addEventListener('focus', handleWindowFocus);
 
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
       window.removeEventListener('focus', handleWindowFocus);
-      if (syncTimeout) {
-        clearTimeout(syncTimeout);
-      }
+      nodes.current.off('*', autoSave);
+      edges.current.off('*', autoSave);
+      network.destroy();
     };
-  }, [session, syncCollapsedStateFromDatabase]);
+  }, [isDark, collapseNode, autoSave, syncCollapsedStateFromDatabase]);
 
   // Loads graph data from Supabase when session changes, initializing root if empty.
   useEffect(() => {
