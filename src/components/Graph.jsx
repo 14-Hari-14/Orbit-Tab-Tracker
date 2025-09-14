@@ -17,11 +17,12 @@ const DEFAULT_NODE_VALUE = 20; // New: Default value for node sizing to ensure v
 
 // --- Utility Functions ---
 // Saves graph data (nodes, edges) to local storage for persistence.
-const saveDataToLocalStorage = (nodes, edges) => {
+const saveDataToLocalStorage = (nodes, edges, allNodesRef) => {
   try {
     const plainNodes = nodes.get({ returnType: 'Array' });
     const plainEdges = edges.get({ returnType: 'Array' });
-    const dataToStore = JSON.stringify({ nodes: plainNodes, edges: plainEdges });
+    const allNodesArray = Array.from(allNodesRef.values());
+    const dataToStore = JSON.stringify({ nodes: plainNodes, edges: plainEdges, all_nodes: allNodesArray });
     localStorage.setItem(LOCAL_STORAGE_KEY, dataToStore);
   } catch (error) {
     console.error("Failed to save graph data:", error);
@@ -278,7 +279,7 @@ const LoginButton = ({ isDark, session, onAuthClick }) => {
         e.currentTarget.style.backgroundColor = isLoggedIn && session.user.email ? '#28a745' : '#007acc';
       }}
     >
-      {isLoggedIn && session.user.email ? `✓ Synced as ${userEmail}` : '🔄 Sign in to Sync'}
+      {isLoggedIn && session.user.email ? `✓ Synced as ${userEmail}` : ' Sign in to Sync'}
     </button>
   );
 };
@@ -520,10 +521,17 @@ export default function Graph() {
       nodes.current.clear();
       edges.current.clear();
       
-      // If we have collapsed data, we need to reconstruct the graph properly
-      // Load all nodes and edges normally - collapsed state is now in database
+      // Load visible nodes and all edges
       nodes.current.add(loaded.nodes);
       edges.current.add(loaded.edges);
+      
+      // Load all_nodes into ref
+      allNodesRef.current.clear();
+      if (loaded.all_nodes) {
+        loaded.all_nodes.forEach(node => {
+          allNodesRef.current.set(node.id, node);
+        });
+      }
     }
   }, []);
 
@@ -531,7 +539,7 @@ export default function Graph() {
   // Auto-saves graph data to local storage (collapsed state now in database).
   const autoSave = useCallback(() => {
     // Save to localStorage for immediate backup
-    saveDataToLocalStorage(nodes.current, edges.current);
+    saveDataToLocalStorage(nodes.current, edges.current, allNodesRef.current);
     // Note: collapsed state is now stored in database automatically via updateNodeInSupabase
   }, []);
 
@@ -605,218 +613,209 @@ export default function Graph() {
     return edges.current.get({ filter: edge => edge.from === parentId }).map(edge => edge.to);
   }, []);
 
-  // 🔄 RECURSIVE COLLAPSE: Collapses a node and all its descendant parent nodes
-  const collapseNode = useCallback(async (parentId) => {
-    const parentNode = nodes.current.get(parentId);
-    if (!parentNode || !parentNode.is_parent || parentNode.is_collapsed) return;
-    
-    const directChildren = getDirectChildren(parentId);
-    if (directChildren.length === 0) return;
+  const getBottomUpCollapsedOrder = (collapsedSet, allEdges) => {
+  const order = [];
+  const visited = new Set();
 
-    console.log(`🔄 Recursively collapsing node: ${parentNode.label}`);
+  const visit = (id) => {
+    if (visited.has(id)) return;
+    visited.add(id);
 
-    // Get ALL descendants (children, grandchildren, etc.)
-    const getAllDescendants = (nodeId) => {
-      const result = new Set();
-      const queue = [nodeId];
-      
-      while (queue.length > 0) {
-        const currentId = queue.shift();
-        const children = getDirectChildren(currentId);
-        
-        children.forEach(childId => {
-          if (!result.has(childId)) {
-            result.add(childId);
-            queue.push(childId);
-          }
-        });
-      }
-      
-      return Array.from(result);
+    // Find children that are also in collapsedSet
+    const children = allEdges
+      .filter(edge => edge.from === id)
+      .map(edge => edge.to)
+      .filter(childId => collapsedSet.has(childId));
+
+    children.forEach(visit);
+
+    order.push(id);
     };
 
-    const allDescendants = getAllDescendants(parentId);
+    Array.from(collapsedSet).forEach(visit);
+    return order;
+  };
+
+  //  RECURSIVE COLLAPSE: Collapses a node and all its descendant parent nodes
+  // Replace collapseNode with this (no longer removes edges, only nodes; updates is_collapsed)
+const collapseNode = useCallback(async (parentId) => {
+  const parentNode = nodes.current.get(parentId);
+  if (!parentNode || !parentNode.is_parent || parentNode.is_collapsed) return;
+  
+  const directChildren = getDirectChildren(parentId);
+  if (directChildren.length === 0) return;
+
+  console.log(` Recursively collapsing node: ${parentNode.label}`);
+
+  // Get ALL descendants
+  const getAllDescendants = (nodeId) => {
+    const result = new Set();
+    const queue = [nodeId];
     
-    // 🔄 STEP 1: Recursively collapse all descendant parent nodes first
-    for (const descendantId of allDescendants) {
-      const descendantNode = nodes.current.get(descendantId);
-      if (descendantNode?.is_parent && !descendantNode?.is_collapsed) {
-        await collapseNode(descendantId); // Recursive call
-      }
-    }
-
-    // 🔄 STEP 2: Hide all descendants visually
-    try {
-      console.log(`🔄 Removing ${allDescendants.length} descendants:`, allDescendants);
-      nodes.current.remove(allDescendants);
-      const descendantEdges = edges.current.get().filter(edge => 
-        allDescendants.includes(edge.from) || allDescendants.includes(edge.to) || edge.from === parentId
-      );
-      console.log(`🔄 Removing ${descendantEdges.length} edges`);
-      edges.current.remove(descendantEdges.map(e => e.id));
-
-      // 🔄 STEP 3: Update parent to collapsed cluster appearance
-      const clusterColors = [
-        { bg: '#FF6B6B', border: '#FF5252' },
-        { bg: '#4ECDC4', border: '#26A69A' },
-        { bg: '#45B7D1', border: '#2196F3' },
-        { bg: '#96CEB4', border: '#66BB6A' },
-        { bg: '#FECA57', border: '#FF9800' },
-        { bg: '#FF9FF3', border: '#E91E63' }
-      ];
+    while (queue.length > 0) {
+      const currentId = queue.shift();
+      const children = getDirectChildren(currentId);
       
-      let hash = 0;
-      String(parentId).split('').forEach(char => {
-        hash = ((hash << 5) - hash + char.charCodeAt(0)) | 0;
+      children.forEach(childId => {
+        if (!result.has(childId)) {
+          result.add(childId);
+          queue.push(childId);
+        }
       });
-      const color = clusterColors[Math.abs(hash) % clusterColors.length];
+    }
+    
+    return Array.from(result);
+  };
 
-      const clusteredParent = {
-        ...parentNode,
-        label: `${parentNode.label} (+${directChildren.length})`,
-        shape: 'circle',
-        color: { background: color.bg, border: color.border },
-        font: { color: '#000000' },
-        value: Math.max(parentNode.value || 25, directChildren.length * 5),
-        is_collapsed: true // Mark as collapsed
-      };
-      
-      clusteredParent.title = generateNodeTitle(clusteredParent);
-      nodes.current.update(clusteredParent);
+  const allDescendants = getAllDescendants(parentId);
+  
+  // STEP 1: Recursively collapse all descendant parent nodes first
+  for (const descendantId of allDescendants) {
+    const descendantNode = nodes.current.get(descendantId);
+    if (descendantNode?.is_parent && !descendantNode?.is_collapsed) {
+      await collapseNode(descendantId); // Recursive call
+    }
+  }
 
-      // 🔄 STEP 4: Update database to mark as collapsed
-      if (session) {
-        await updateNodeInSupabase({ 
-          id: parentNode.id,
-          label: parentNode.label,
-          url: parentNode.url,
-          note: parentNode.note,
-          is_collapsed: true 
-        });
+  // STEP 2: Hide all descendants visually (remove from visible nodes only; keep edges)
+  try {
+    console.log(` Removing ${allDescendants.length} descendants from view:`, allDescendants);
+    nodes.current.remove(allDescendants);
+
+    // STEP 3: Update parent to collapsed cluster appearance
+    const clusterColors = [
+      { bg: '#FF6B6B', border: '#FF5252' },
+      { bg: '#4ECDC4', border: '#26A69A' },
+      { bg: '#45B7D1', border: '#2196F3' },
+      { bg: '#96CEB4', border: '#66BB6A' },
+      { bg: '#FECA57', border: '#FF9800' },
+      { bg: '#FF9FF3', border: '#E91E63' }
+    ];
+    
+    let hash = 0;
+    String(parentId).split('').forEach(char => {
+      hash = ((hash << 5) - hash + char.charCodeAt(0)) | 0;
+    });
+    const color = clusterColors[Math.abs(hash) % clusterColors.length];
+
+    const clusteredParent = {
+      ...parentNode,
+      label: `${parentNode.label} (+${directChildren.length})`,
+      shape: 'circle',
+      color: { background: color.bg, border: color.border },
+      font: { color: '#000000' },
+      value: Math.max(parentNode.value || 25, directChildren.length * 5),
+      is_collapsed: true // Mark as collapsed
+    };
+    
+    clusteredParent.title = generateNodeTitle(clusteredParent);
+    nodes.current.update(clusteredParent);
+
+    // STEP 4: Update database to mark as collapsed (for auth users)
+    if (session) {
+      await updateNodeInSupabase({ 
+        id: parentNode.id,
+        label: parentNode.label,
+        url: parentNode.url,
+        note: parentNode.note,
+        is_collapsed: true 
+      });
+    }
+    
+  } catch (error) {
+    console.error('Error collapsing node:', error);
+  }
+}, [getDirectChildren, generateNodeTitle, session]);
+
+  // SHALLOW EXPAND: Expands a node to show direct children in their last known state
+  // Replace expandNode with this (now uses allNodesRef instead of fetch; no edge addition needed)
+const expandNode = useCallback(async (parentId) => {
+  const parentNode = nodes.current.get(parentId);
+  if (!parentNode || !parentNode.is_collapsed) {
+    console.log(`📖 Expand rejected: parentNode exists: ${!!parentNode}, is_collapsed: ${parentNode?.is_collapsed}`);
+    return;
+  }
+
+  console.log(`📖 Shallow expanding node: ${parentNode.label}`);
+
+  try {
+    // 📖 STEP 1: Get direct children from allNodesRef (local for anonymous, DB-initial for auth)
+    const directChildrenIds = getDirectChildren(parentId);
+    const directChildren = directChildrenIds
+      .map(childId => allNodesRef.current.get(childId))
+      .filter(Boolean);
+    
+    console.log(`📖 Found direct children:`, directChildren.map(c => c?.label).filter(Boolean));
+
+    // 📖 STEP 2: Restore original parent appearance  
+    const restoredParent = {
+      ...parentNode,
+      label: parentNode.label.replace(/ \(\+\d+\)$/, ''), // Remove cluster count
+      shape: parentNode.shape || 'ellipse',
+      value: parentNode.value || 25,
+      is_collapsed: false,
+      color: {
+        border: isDark ? '#888' : '#cccccc',
+        background: isDark ? '#2a2a2a' : '#ffffff'
+      },
+      font: {
+        size: 14,
+        color: isDark ? '#ffffff' : '#000000'
       }
+    };
+    
+    restoredParent.title = generateNodeTitle(restoredParent);
+    nodes.current.update(restoredParent);
+
+    // 📖 STEP 3: Add direct children back to view (preserve their state; edges are already present)
+    if (directChildren.length > 0) {
+      console.log(`📖 Adding ${directChildren.length} direct children:`, directChildren.map(c => c.label));
       
-    } catch (error) {
-      console.error('Error collapsing node:', error);
-    }
-  }, [getDirectChildren, generateNodeTitle, session]);
+      const displayChildren = directChildren.map(child => ({
+        id: child.id,
+        label: child.label,
+        shape: child.shape,
+        value: child.value || DEFAULT_NODE_VALUE,
+        is_parent: child.is_parent,
+        is_collapsed: child.is_collapsed, // Preserve their collapsed state
+        url: child.url,
+        note: child.note,
+        title: generateNodeTitle(child)
+      }));
 
-  // 📖 SHALLOW EXPAND: Expands a node to show direct children in their last known state
-  const expandNode = useCallback(async (parentId) => {
-    const parentNode = nodes.current.get(parentId);
-    if (!parentNode || !parentNode.is_collapsed) {
-      console.log(`📖 Expand rejected: parentNode exists: ${!!parentNode}, is_collapsed: ${parentNode?.is_collapsed}`);
-      return;
-    }
-
-    console.log(`📖 Shallow expanding node: ${parentNode.label}`);
-
-    try {
-      // 📖 STEP 1: Get direct children from database (they might not be in current view)
-      const { nodes: allNodes, edges: allEdges } = await fetchGraphData();
-      console.log(`📖 Fetched ${allNodes.length} nodes and ${allEdges.length} edges from database`);
+      // Add or update in visible nodes
+      const existingNodeIds = nodes.current.getIds();
+      const newChildren = displayChildren.filter(child => !existingNodeIds.includes(child.id));
+      const existingChildren = displayChildren.filter(child => existingNodeIds.includes(child.id));
       
-      const directChildren = allEdges
-        .filter(edge => edge.from === parentId)
-        .map(edge => allNodes.find(node => node.id === edge.to))
-        .filter(Boolean);
-        
-      console.log(`📖 Found direct children edges:`, allEdges.filter(edge => edge.from === parentId));
-      console.log(`📖 Direct children nodes:`, directChildren);
+      if (newChildren.length > 0) {
+        nodes.current.add(newChildren);
+      }
+      if (existingChildren.length > 0) {
+        nodes.current.update(existingChildren);
+      }
+    } else {
+      console.log(`📖 No direct children found for node ${parentId}`);
+    }
 
-      // 📖 STEP 2: Restore original parent appearance  
-      const restoredParent = {
-        ...parentNode,
+    // 📖 STEP 4: Update database to mark as expanded (for auth users)
+    if (session) {
+      await updateNodeInSupabase({ 
+        id: parentNode.id,
         label: parentNode.label.replace(/ \(\+\d+\)$/, ''), // Remove cluster count
-        shape: parentNode.shape || 'ellipse',
-        value: parentNode.value || 25,
-        is_collapsed: false,
-        color: {
-          border: isDark ? '#888' : '#cccccc',
-          background: isDark ? '#2a2a2a' : '#ffffff'
-        },
-        font: {
-          size: 14,
-          color: isDark ? '#ffffff' : '#000000'
-        }
-      };
-      
-      restoredParent.title = generateNodeTitle(restoredParent);
-      nodes.current.update(restoredParent);
-
-      // 📖 STEP 3: Add children back to view (in their database state)
-      if (directChildren.length > 0) {
-        console.log(`📖 Found ${directChildren.length} direct children to expand:`, directChildren.map(c => c.label));
-        
-        const displayChildren = directChildren.map(child => ({
-          id: child.id,
-          label: child.label,
-          shape: child.shape,
-          value: child.value || DEFAULT_NODE_VALUE,
-          is_parent: child.is_parent,
-          is_collapsed: child.is_collapsed, // Preserve their collapsed state
-          url: child.url,
-          note: child.note,
-          title: generateNodeTitle(child)
-        }));
-
-        console.log(`📖 Adding display children:`, displayChildren.map(c => ({ id: c.id, label: c.label })));
-        
-        // Check if these nodes already exist in the current graph
-        const existingNodeIds = nodes.current.getIds();
-        const newChildren = displayChildren.filter(child => !existingNodeIds.includes(child.id));
-        const existingChildren = displayChildren.filter(child => existingNodeIds.includes(child.id));
-        
-        console.log(`📖 New children to add:`, newChildren.map(c => c.label));
-        console.log(`📖 Existing children to update:`, existingChildren.map(c => c.label));
-        
-        if (newChildren.length > 0) {
-          nodes.current.add(newChildren);
-        }
-        if (existingChildren.length > 0) {
-          nodes.current.update(existingChildren);
-        }
-        
-        // Add edges back
-        const childEdgeIds = directChildren.map(child => child.id);
-        const childEdges = allEdges
-          .filter(edge => edge.from === parentId && childEdgeIds.includes(edge.to))
-          .map(edge => ({ id: edge.id, from: edge.from, to: edge.to }));
-          
-        console.log(`📖 Adding ${childEdges.length} edges back`);
-        
-        // Check if edges already exist
-        const existingEdgeIds = edges.current.getIds();
-        const newEdges = childEdges.filter(edge => !existingEdgeIds.includes(edge.id));
-        const existingEdges = childEdges.filter(edge => existingEdgeIds.includes(edge.id));
-        
-        if (newEdges.length > 0) {
-          edges.current.add(newEdges);
-        }
-        if (existingEdges.length > 0) {
-          edges.current.update(existingEdges);
-        }
-      } else {
-        console.log(`📖 No direct children found for node ${parentId}`);
-      }
-
-      // 📖 STEP 4: Update database to mark as expanded
-      if (session) {
-        await updateNodeInSupabase({ 
-          id: parentNode.id,
-          label: parentNode.label.replace(/ \(\+\d+\)$/, ''), // Remove cluster count
-          url: parentNode.url,
-          note: parentNode.note,
-          is_collapsed: false 
-        });
-      }
-
-      // Enable physics temporarily for layout
-      enablePhysicsTemporarily();
-
-    } catch (error) {
-      console.error('Error expanding node:', error);
+        url: parentNode.url,
+        note: parentNode.note,
+        is_collapsed: false 
+      });
     }
-  }, [generateNodeTitle, enablePhysicsTemporarily, session, fetchGraphData]);
+
+    // Enable physics temporarily for layout
+    enablePhysicsTemporarily();
+
+  } catch (error) {
+    console.error('Error expanding node:', error);
+  }
+}, [generateNodeTitle, enablePhysicsTemporarily, session, allNodesRef, getDirectChildren, isDark]);
 
   // Helper function to get all descendants from database data
   const getDescendantsFromData = useCallback((parentId, allNodes, allEdges) => {
@@ -839,12 +838,12 @@ export default function Graph() {
     return Array.from(descendants);
   }, []);
 
-  // 🔄 SYNC COLLAPSED STATE: Syncs current graph state with database state
+  //  SYNC COLLAPSED STATE: Syncs current graph state with database state
   const syncCollapsedStateFromDatabase = useCallback(async () => {
     if (!session) return;
 
     try {
-      console.log('🔄 Syncing collapsed state from database...');
+      console.log(' Syncing collapsed state from database...');
       const { nodes: dbNodes } = await fetchGraphData();
       
       // Create a map of database collapsed states
@@ -877,17 +876,17 @@ export default function Graph() {
 
       // Apply the sync operations
       for (const nodeId of nodesToCollapse) {
-        console.log(`🔄 Syncing: Collapsing node ${nodeId} to match database`);
+        console.log(` Syncing: Collapsing node ${nodeId} to match database`);
         await collapseNode(nodeId);
       }
       
       for (const nodeId of nodesToExpand) {
-        console.log(`🔄 Syncing: Expanding node ${nodeId} to match database`);
+        console.log(` Syncing: Expanding node ${nodeId} to match database`);
         await expandNode(nodeId);
       }
 
       if (nodesToCollapse.length > 0 || nodesToExpand.length > 0) {
-        console.log(`🔄 Sync complete: ${nodesToCollapse.length} collapsed, ${nodesToExpand.length} expanded`);
+        console.log(` Sync complete: ${nodesToCollapse.length} collapsed, ${nodesToExpand.length} expanded`);
       }
 
     } catch (error) {
@@ -1444,16 +1443,16 @@ Would you like to expand these clusters to reveal the node?`;
 
     network.on("doubleClick", async (params) => {
       const nodeId = params.nodes[0];
-      console.log(`🔄 Double-click detected on node: ${nodeId}`);
+      console.log(` Double-click detected on node: ${nodeId}`);
       if (!nodeId) return;
 
       const node = nodes.current.get(nodeId);
       if (!node) {
-        console.log(`🔄 Node not found: ${nodeId}`);
+        console.log(` Node not found: ${nodeId}`);
         return;
       }
 
-      console.log(`🔄 Node details:`, { 
+      console.log(` Node details:`, { 
         id: node.id, 
         label: node.label, 
         is_parent: node.is_parent, 
@@ -1463,7 +1462,7 @@ Would you like to expand these clusters to reveal the node?`;
 
       // Check if it's a URL node first
       if (node.url && node.url.trim() !== '') {
-        console.log(`🔄 Opening URL: ${node.url}`);
+        console.log(` Opening URL: ${node.url}`);
         window.open(node.url, "_blank");
         return;
       }
@@ -1471,17 +1470,17 @@ Would you like to expand these clusters to reveal the node?`;
       // Check if it's a parent node that can be collapsed/expanded
       if (node.is_parent) {
         if (node.is_collapsed) {
-          console.log(`🔄 Expanding collapsed node: ${node.label}`);
+          console.log(` Expanding collapsed node: ${node.label}`);
           // It's collapsed, so expand it (shallow)
           await expandNode(nodeId);
         } else {
-          console.log(`🔄 Collapsing expanded node: ${node.label}`);
+          console.log(` Collapsing expanded node: ${node.label}`);
           // It's not collapsed, so collapse it (recursive)
           await collapseNode(nodeId);
         }
         autoSave();
       } else {
-        console.log(`🔄 Node is not a parent, no action taken`);
+        console.log(` Node is not a parent, no action taken`);
       }
     });
 
@@ -1532,78 +1531,93 @@ Would you like to expand these clusters to reveal the node?`;
   }, [isDark, collapseNode, autoSave, syncCollapsedStateFromDatabase]);
 
   // Loads graph data from Supabase when session changes, initializing root if empty.
-  useEffect(() => {
-    if (session) {
-      const loadAndInitializeGraph = async () => {
-        const { nodes: fetchedNodes, edges: fetchedEdges } = await fetchGraphData();
+  // Replace the entire Supabase loading useEffect with this (includes new collapse application after adding data)
+useEffect(() => {
+  if (session) {
+    const loadAndInitializeGraph = async () => {
+      const { nodes: fetchedNodes, edges: fetchedEdges } = await fetchGraphData();
 
-        if (fetchedNodes.length === 0) {
-          const rootNode = { 
-            id: Date.now(), 
-            label: "Root", 
-            is_parent: true, 
-            is_root: true, 
-            shape: "circle", 
-            value: 25, 
-            note: "Start here!" 
-          };
-          const savedRoot = await addNodeToSupabase(rootNode);
-          if (savedRoot) {
-              const displayNode = { 
-                id: savedRoot.id, 
-                label: savedRoot.label, 
-                shape: savedRoot.shape, 
-                value: savedRoot.value || 25,
-                is_parent: savedRoot.is_parent,
-                is_root: savedRoot.is_root,
-                url: savedRoot.url,
-                note: savedRoot.note,
-                title: generateNodeTitle(savedRoot) 
-              };
-              nodes.current.clear();
-              edges.current.clear();
-              nodes.current.add(displayNode);
-              
-              // NEW: Update reference table
-              allNodesRef.current.clear();
-              allNodesRef.current.set(savedRoot.id, savedRoot);
-          }
-        } else {
-          const displayNodes = fetchedNodes.map(n => ({ 
-            id: n.id, 
-            label: n.label, 
-            shape: n.shape, 
-            value: n.value || DEFAULT_NODE_VALUE,
-            is_parent: n.is_parent,
-            is_collapsed: n.is_collapsed, // Include collapsed state
-            url: n.url,
-            note: n.note,
-            title: generateNodeTitle(n) 
-          }));
-          nodes.current.clear();
-          edges.current.clear();
-          nodes.current.add(displayNodes);
-          edges.current.add(fetchedEdges);
-          
-          // NEW: Update reference table with ALL nodes from database
-          allNodesRef.current.clear();
-          fetchedNodes.forEach(node => {
-            allNodesRef.current.set(node.id, {
-              ...node,
-              value: node.value || DEFAULT_NODE_VALUE,
-              title: generateNodeTitle(node)
-            });
-          });
+      if (fetchedNodes.length === 0) {
+        const rootNode = { 
+          id: Date.now(), 
+          label: "Root", 
+          is_parent: true, 
+          is_root: true, 
+          shape: "circle", 
+          value: 25, 
+          note: "Start here!" 
+        };
+        const savedRoot = await addNodeToSupabase(rootNode);
+        if (savedRoot) {
+            const displayNode = { 
+              id: savedRoot.id, 
+              label: savedRoot.label, 
+              shape: savedRoot.shape, 
+              value: savedRoot.value || 25,
+              is_parent: savedRoot.is_parent,
+              is_root: savedRoot.is_root,
+              url: savedRoot.url,
+              note: savedRoot.note,
+              title: generateNodeTitle(savedRoot) 
+            };
+            nodes.current.clear();
+            edges.current.clear();
+            nodes.current.add(displayNode);
+            
+            // NEW: Update reference table
+            allNodesRef.current.clear();
+            allNodesRef.current.set(savedRoot.id, savedRoot);
         }
+      } else {
+        const displayNodes = fetchedNodes.map(n => ({ 
+          id: n.id, 
+          label: n.label, 
+          shape: n.shape, 
+          value: n.value || DEFAULT_NODE_VALUE,
+          is_parent: n.is_parent,
+          is_collapsed: n.is_collapsed, // Include collapsed state
+          url: n.url,
+          note: n.note,
+          title: generateNodeTitle(n) 
+        }));
+        nodes.current.clear();
+        edges.current.clear();
+        nodes.current.add(displayNodes);
+        edges.current.add(fetchedEdges);
         
-        // Sync collapsed state after loading data
-        await syncCollapsedStateFromDatabase();
+        // NEW: Update reference table with ALL nodes from database
+        allNodesRef.current.clear();
+        fetchedNodes.forEach(node => {
+          allNodesRef.current.set(node.id, {
+            ...node,
+            value: node.value || DEFAULT_NODE_VALUE,
+            title: generateNodeTitle(node)
+          });
+        });
+
+        // NEW: Explicitly apply collapses to match DB state (after adding all nodes/edges)
+        const collapsedParents = new Set(
+          fetchedNodes
+            .filter(n => n.is_parent && n.is_collapsed)
+            .map(n => n.id)
+        );
         
-        autoSave(); // Save fetched data to local as backup
-      };
-      loadAndInitializeGraph();
-    }
-  }, [session, autoSave, syncCollapsedStateFromDatabase]);
+        if (collapsedParents.size > 0) {
+          const order = getBottomUpCollapsedOrder(collapsedParents, fetchedEdges);
+          for (const parentId of order) {
+            await collapseNode(parentId);
+          }
+        }
+      }
+      
+      // Sync any remaining mismatches (e.g., for multi-tab changes)
+      await syncCollapsedStateFromDatabase();
+      
+      autoSave(); // Save fetched data to local as backup
+    };
+    loadAndInitializeGraph();
+  }
+}, [session, autoSave, syncCollapsedStateFromDatabase]);
 
   // Updates network options when theme changes.
   useEffect(() => {
