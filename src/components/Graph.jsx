@@ -3,7 +3,7 @@ import { DataSet, Network } from "vis-network/standalone";
 import { getNetworkOptions, getProjectHeaderStyle, getThemeToggleStyle, getFixedToolbarStyle } from './styles';
 import { GridBg } from './ui/GridBg';
 import HCaptcha from '@hcaptcha/react-hcaptcha';
-
+import FuzzySearch from "./FuzzySearch";
 import {supabase} from './supabaseClient';
 import { fetchGraphData, addNodeToSupabase, addEdgeToSupabase, updateNodeInSupabase, deleteNodeFromSupabase, saveCollapsedStateToSupabase, loadCollapsedStateFromSupabase } from './api'; 
 
@@ -494,6 +494,7 @@ export default function Graph() {
   const captcha = useRef(null);
   const nodes = useRef(new DataSet([]));
   const edges = useRef(new DataSet([]));
+  const allNodesRef = useRef(new Map()); // NEW: Reference table for all nodes including hidden ones
   
   // State management for selection, theme, modal, and user session.
   const [selectedNodeId, setSelectedNodeId] = useState(null);
@@ -509,6 +510,9 @@ export default function Graph() {
   const [showCaptcha, setShowCaptcha] = useState(false);
   const [keyboardFeedback, setKeyboardFeedback] = useState(null);
   const [showKeyboardShortcuts, setShowKeyboardShortcuts] = useState(false);
+
+  // overriding browser keyboard shortcuts
+  const [isSearchOpen, setIsSearchOpen] = useState(false);
 
   useEffect(() => {
     const loaded = loadDataFromLocalStorage();
@@ -542,6 +546,25 @@ export default function Graph() {
       }, 3000); // Allow 3 seconds for physics to settle
     }
   }, []);
+
+  useEffect(() => {
+  const handleKeyDown = (event) => {
+    // Check for Cmd+K on Mac or Ctrl+K on Windows/Linux
+    if (event.key === 'k' && (event.metaKey || event.ctrlKey)) {
+      event.preventDefault(); 
+      
+      // Toggle the search modal's visibility
+      setIsSearchOpen(prev => !prev); 
+    }
+  };
+
+  document.addEventListener('keydown', handleKeyDown);
+
+  // Cleanup the listener when the component unmounts to prevent memory leaks
+  return () => {
+    document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, []); // The empty array ensures this effect runs only once
 
   // Initiates Google OAuth login via Supabase with CAPTCHA protection.
   const handleLoginClick = async () => {
@@ -929,12 +952,18 @@ export default function Graph() {
         };
         nodes.current.add(displayNode);
         
+        // NEW: Update reference table
+        allNodesRef.current.set(savedNode.id, {
+          ...savedNode,
+          value: savedNode.value || DEFAULT_NODE_VALUE,
+          title: generateNodeTitle(savedNode)
+        });
+        
         const savedEdge = await addEdgeToSupabase(modalState.parentId, savedNode.id);
         if (savedEdge) {
           edges.current.add({ id: savedEdge.id, from: savedEdge.from, to: savedEdge.to });
         }
         
-        // Enable physics temporarily to allow proper layout
         enablePhysicsTemporarily();
         autoSave();
       }
@@ -965,7 +994,13 @@ export default function Graph() {
         nodes.current.add(displayNode);
         setSelectedNodeId(savedNode.id);
         
-        // Enable physics temporarily to allow proper layout
+        // NEW: Update reference table
+        allNodesRef.current.set(savedNode.id, {
+          ...savedNode,
+          value: savedNode.value || 25,
+          title: generateNodeTitle(savedNode)
+        });
+        
         enablePhysicsTemporarily();
         autoSave();
       }
@@ -976,12 +1011,15 @@ export default function Graph() {
       }
       await updateNodeInSupabase(updatedNode);
       
-      // Ensure the updated node maintains all necessary properties
       const fullUpdatedNode = {
         ...updatedNode,
         title: generateNodeTitle(updatedNode)
       };
       nodes.current.update(fullUpdatedNode);
+      
+      // NEW: Update reference table
+      allNodesRef.current.set(updatedNode.id, fullUpdatedNode);
+      
       autoSave();
     }
     closeModal();
@@ -1022,7 +1060,7 @@ export default function Graph() {
 
     const selectedNode = nodes.current.get(selectedNodeId);
     const descendants = getAllDescendants(selectedNodeId);
-    const totalNodesToDelete = descendants.length + 1; // +1 for the selected node itself
+    const totalNodesToDelete = descendants.length + 1;
     const isRootNode = selectedNode?.is_root === true;
 
     let confirmMessage;
@@ -1042,11 +1080,18 @@ export default function Graph() {
         for (const descendantId of descendants.reverse()) {
           await deleteNodeFromSupabase(descendantId);
           nodes.current.remove(descendantId);
+          
+          // NEW: Remove from reference table
+          allNodesRef.current.delete(descendantId);
         }
         
         // Finally delete the selected node
         await deleteNodeFromSupabase(selectedNodeId);
-        nodes.current.remove(selectedNodeId); 
+        nodes.current.remove(selectedNodeId);
+        
+        // NEW: Remove from reference table
+        allNodesRef.current.delete(selectedNodeId);
+        
         setSelectedNodeId(null);
         autoSave();
 
@@ -1063,6 +1108,111 @@ export default function Graph() {
     setKeyboardFeedback({ message, isError });
     setTimeout(() => setKeyboardFeedback(null), 2000);
   }, []);
+
+  // Smart search handler that can reveal hidden nodes by expanding clusters
+  const handleSmartSearch = useCallback(async (nodeId) => {
+    const targetNode = allNodesRef.current.get(nodeId);
+    if (!targetNode) {
+      showKeyboardFeedback("Node not found", true);
+      return;
+    }
+
+    // Check if node has URL - if so, open it directly
+    if (targetNode.url && targetNode.url.trim() !== '') {
+      window.open(targetNode.url, '_blank');
+      showKeyboardFeedback(`Opened ${targetNode.url}`, false);
+      return;
+    }
+
+    // Check if node is currently visible in the graph
+    const currentNodes = nodes.current.getIds();
+    if (currentNodes.includes(nodeId)) {
+      // Node is visible, just focus on it
+      if (networkRef.current) {
+        networkRef.current.focus(nodeId, { scale: 1.2, animation: true });
+        networkRef.current.selectNodes([nodeId]);
+        setSelectedNodeId(nodeId);
+        showKeyboardFeedback(`Found: ${targetNode.label}`, false);
+      }
+      return;
+    }
+
+    // Node is hidden in a cluster - need to find and expand ancestor clusters
+    const findPathToNode = (targetNodeId) => {
+      const path = [];
+      const allEdges = edges.current.get();
+      
+      // Find parent of target node
+      const findParent = (nodeId) => {
+        const parentEdge = allEdges.find(edge => edge.to === nodeId);
+        return parentEdge ? parentEdge.from : null;
+      };
+
+      // Build path from target to root
+      let currentId = targetNodeId;
+      while (currentId) {
+        const parentId = findParent(currentId);
+        if (parentId) {
+          path.unshift(parentId); // Add parent to beginning of path
+        }
+        currentId = parentId;
+      }
+      
+      return path;
+    };
+
+    const pathToNode = findPathToNode(nodeId);
+    const collapsedAncestors = [];
+
+    // Find which ancestors are collapsed
+    for (const ancestorId of pathToNode) {
+      const ancestorNode = allNodesRef.current.get(ancestorId);
+      if (ancestorNode && ancestorNode.is_collapsed) {
+        collapsedAncestors.push(ancestorNode);
+      }
+    }
+
+    if (collapsedAncestors.length > 0) {
+      // Ask user if they want to expand clusters to reveal the node
+      const clusterNames = collapsedAncestors.map(n => `"${n.label}"`).join(', ');
+      const confirmMessage = `"${targetNode.label}" is hidden inside collapsed cluster(s): ${clusterNames}. 
+
+Would you like to expand these clusters to reveal the node?`;
+
+      if (window.confirm(confirmMessage)) {
+        try {
+          // Expand all collapsed ancestors in order (top-down)
+          for (const ancestorNode of collapsedAncestors) {
+            if (ancestorNode.is_collapsed) {
+              await expandNode(ancestorNode.id);
+              showKeyboardFeedback(`Expanded: ${ancestorNode.label}`, false);
+              // Small delay to allow graph to update between expansions
+              await new Promise(resolve => setTimeout(resolve, 500));
+            }
+          }
+
+          // After expanding, focus on the target node
+          setTimeout(() => {
+            if (networkRef.current) {
+              networkRef.current.focus(nodeId, { scale: 1.2, animation: true });
+              networkRef.current.selectNodes([nodeId]);
+              setSelectedNodeId(nodeId);
+              showKeyboardFeedback(`Revealed: ${targetNode.label}`, false);
+            }
+          }, 1000);
+
+        } catch (error) {
+          console.error('Error expanding clusters:', error);
+          showKeyboardFeedback("Error expanding clusters", true);
+        }
+      } else {
+        showKeyboardFeedback("Search cancelled", false);
+      }
+    } else {
+      // Node should be visible but isn't - this shouldn't happen
+      showKeyboardFeedback(`Node "${targetNode.label}" is hidden but no collapsed ancestors found`, true);
+    }
+  }, [allNodesRef, nodes, edges, networkRef, expandNode, showKeyboardFeedback]);
 
   // Handles keyboard shortcuts.
   const handleKeyDown = useCallback(async (event) => {
@@ -1413,6 +1563,10 @@ export default function Graph() {
               nodes.current.clear();
               edges.current.clear();
               nodes.current.add(displayNode);
+              
+              // NEW: Update reference table
+              allNodesRef.current.clear();
+              allNodesRef.current.set(savedRoot.id, savedRoot);
           }
         } else {
           const displayNodes = fetchedNodes.map(n => ({ 
@@ -1421,6 +1575,7 @@ export default function Graph() {
             shape: n.shape, 
             value: n.value || DEFAULT_NODE_VALUE,
             is_parent: n.is_parent,
+            is_collapsed: n.is_collapsed, // Include collapsed state
             url: n.url,
             note: n.note,
             title: generateNodeTitle(n) 
@@ -1429,6 +1584,16 @@ export default function Graph() {
           edges.current.clear();
           nodes.current.add(displayNodes);
           edges.current.add(fetchedEdges);
+          
+          // NEW: Update reference table with ALL nodes from database
+          allNodesRef.current.clear();
+          fetchedNodes.forEach(node => {
+            allNodesRef.current.set(node.id, {
+              ...node,
+              value: node.value || DEFAULT_NODE_VALUE,
+              title: generateNodeTitle(node)
+            });
+          });
         }
         
         // Sync collapsed state after loading data
@@ -1537,6 +1702,20 @@ export default function Graph() {
       />
 
       <KeyboardFeedback feedback={keyboardFeedback} isDark={isDark} />
+
+      <FuzzySearch
+        isOpen={isSearchOpen}
+        onClose={() => setIsSearchOpen(false)}
+        nodes={Array.from(allNodesRef.current.values())} // NEW: Use reference table instead of visible nodes
+        isDark={isDark}
+        onSelectNode={handleSmartSearch} // NEW: Use smart search handler
+        onEditNode={(nodeId) => {
+          openModal('edit', nodeId);
+        }}
+        onOpenUrl={(url) => {
+          window.open(url, '_blank');
+        }}
+      />
 
       <div
         ref={containerRef}
