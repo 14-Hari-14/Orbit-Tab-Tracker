@@ -515,7 +515,9 @@ export default function Graph() {
   // overriding browser keyboard shortcuts
   const [isSearchOpen, setIsSearchOpen] = useState(false);
 
-  useEffect(() => {
+  // Replace the local load useEffect with this (now applies collapses after loading)
+useEffect(() => {
+  const loadData = async () => {
     const loaded = loadDataFromLocalStorage();
     if (loaded) {
       nodes.current.clear();
@@ -532,8 +534,25 @@ export default function Graph() {
           allNodesRef.current.set(node.id, node);
         });
       }
+
+      // NEW: Explicitly apply collapses to match saved state (similar to DB load)
+      const collapsedParents = new Set(
+        loaded.all_nodes
+          .filter(n => n.is_parent && n.is_collapsed)
+          .map(n => n.id)
+      );
+      
+      if (collapsedParents.size > 0) {
+        const order = getBottomUpCollapsedOrder(collapsedParents, loaded.edges);
+        for (const parentId of order) {
+          await collapseNode(parentId);
+        }
+      }
     }
-  }, []);
+  };
+  
+  loadData();
+}, []);
 
   // --- Handler Functions ---
   // Auto-saves graph data to local storage (collapsed state now in database).
@@ -710,6 +729,7 @@ const collapseNode = useCallback(async (parentId) => {
     
     clusteredParent.title = generateNodeTitle(clusteredParent);
     nodes.current.update(clusteredParent);
+    allNodesRef.current.set(parentId, clusteredParent);
 
     // STEP 4: Update database to mark as collapsed (for auth users)
     if (session) {
@@ -766,6 +786,7 @@ const expandNode = useCallback(async (parentId) => {
     
     restoredParent.title = generateNodeTitle(restoredParent);
     nodes.current.update(restoredParent);
+    allNodesRef.current.set(parentId, restoredParent);
 
     // 📖 STEP 3: Add direct children back to view (preserve their state; edges are already present)
     if (directChildren.length > 0) {
