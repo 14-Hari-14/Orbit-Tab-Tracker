@@ -1424,6 +1424,42 @@ Would you like to expand these clusters to reveal the node?`;
     return () => subscription.unsubscribe();
   }, []); // No dependencies needed - only check initial session
 
+  // NEW: Set up realtime subscription for nodes table changes
+  useEffect(() => {
+    if (!session) return;
+
+    const channel = supabase.channel('nodes-changes');
+    channel
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'nodes' },
+        async (payload) => {
+          console.log('Realtime change received:', payload);
+          const { new: updatedNode } = payload;
+
+          if (updatedNode.is_parent) {
+            const localNode = nodes.current.get(updatedNode.id);
+            if (localNode && localNode.is_collapsed !== updatedNode.is_collapsed) {
+              console.log(`Syncing realtime change for node ${updatedNode.id}: is_collapsed ${updatedNode.is_collapsed}`);
+              if (updatedNode.is_collapsed) {
+                await collapseNode(updatedNode.id);
+              } else {
+                await expandNode(updatedNode.id);
+              }
+              autoSave();
+            }
+          }
+        }
+      )
+      .subscribe((status) => {
+        console.log('Realtime subscription status:', status);
+      });
+
+    return () => {
+      channel.unsubscribe();
+    };
+  }, [session, collapseNode, expandNode, autoSave]);
+
   // Initializes the vis-network graph and handles events like selection and double-click.
   useEffect(() => {
     const options = getNetworkOptions(isDark);
@@ -1511,13 +1547,9 @@ Would you like to expand these clusters to reveal the node?`;
         // Tab is hidden - disable physics
         network.setOptions({ physics: false });
       } else {
-        // Tab is visible again - sync state and briefly re-enable physics
-        setTimeout(async () => {
-          // Sync collapsed state from database in case another browser changed it
-          await syncCollapsedStateFromDatabase();
-          
+        // Tab is visible again - briefly re-enable physics (removed sync to avoid races)
+        setTimeout(() => {
           network.setOptions({ physics: true });
-          // Disable physics again after stabilization
           setTimeout(() => {
             network.setOptions({ physics: false });
           }, 2000);
@@ -1529,10 +1561,8 @@ Would you like to expand these clusters to reveal the node?`;
 
     // Also handle window focus events for additional safety
     const handleWindowFocus = () => {
-      // When window regains focus, sync state and enable physics briefly
-      setTimeout(async () => {
-        await syncCollapsedStateFromDatabase();
-        
+      // When window regains focus, enable physics briefly (removed sync to avoid races)
+      setTimeout(() => {
         network.setOptions({ physics: true });
         setTimeout(() => {
           network.setOptions({ physics: false });
@@ -1549,7 +1579,7 @@ Would you like to expand these clusters to reveal the node?`;
       edges.current.off('*', autoSave);
       network.destroy();
     };
-  }, [isDark, collapseNode, autoSave, syncCollapsedStateFromDatabase]);
+  }, [isDark, collapseNode, autoSave]);
 
   // Loads graph data from Supabase when session changes, initializing root if empty.
   // Replace the entire Supabase loading useEffect with this (includes new collapse application after adding data)
