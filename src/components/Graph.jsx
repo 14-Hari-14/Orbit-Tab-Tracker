@@ -656,7 +656,7 @@ useEffect(() => {
   };
 
   //  RECURSIVE COLLAPSE: Collapses a node and all its descendant parent nodes
-  // Replace collapseNode with this (no longer removes edges, only nodes; updates is_collapsed)
+  // Replace collapseNode with this (no longer removes edges, only nodes; only updates is_collapsed)
 const collapseNode = useCallback(async (parentId) => {
   const parentNode = nodes.current.get(parentId);
   if (!parentNode || !parentNode.is_parent || parentNode.is_collapsed) return;
@@ -1428,35 +1428,42 @@ Would you like to expand these clusters to reveal the node?`;
   useEffect(() => {
     if (!session) return;
 
-    const channel = supabase.channel('nodes-changes');
-    channel
-      .on(
-        'postgres_changes',
-        { event: 'UPDATE', schema: 'public', table: 'nodes' },
-        async (payload) => {
-          console.log('Realtime change received:', payload);
-          const { new: updatedNode } = payload;
+    const setupRealtime = async () => {
+      // Authenticate the realtime client for RLS
+      await supabase.realtime.setAuth(session.access_token);
 
-          if (updatedNode.is_parent) {
-            const localNode = nodes.current.get(updatedNode.id);
-            if (localNode && localNode.is_collapsed !== updatedNode.is_collapsed) {
-              console.log(`Syncing realtime change for node ${updatedNode.id}: is_collapsed ${updatedNode.is_collapsed}`);
-              if (updatedNode.is_collapsed) {
-                await collapseNode(updatedNode.id);
-              } else {
-                await expandNode(updatedNode.id);
+      const channel = supabase.channel('nodes-changes');
+      channel
+        .on(
+          'postgres_changes',
+          { event: 'UPDATE', schema: 'public', table: 'nodes' },
+          async (payload) => {
+            console.log('Realtime change received:', payload);
+            const { new: updatedNode } = payload;
+
+            if (updatedNode.is_parent) {
+              const localNode = nodes.current.get(updatedNode.id);
+              if (localNode && localNode.is_collapsed !== updatedNode.is_collapsed) {
+                console.log(`Syncing realtime change for node ${updatedNode.id}: is_collapsed ${updatedNode.is_collapsed}`);
+                if (updatedNode.is_collapsed) {
+                  await collapseNode(updatedNode.id);
+                } else {
+                  await expandNode(updatedNode.id);
+                }
+                autoSave();
               }
-              autoSave();
             }
           }
-        }
-      )
-      .subscribe((status) => {
-        console.log('Realtime subscription status:', status);
-      });
+        )
+        .subscribe((status) => {
+          console.log('Realtime subscription status:', status);
+        });
+    };
+
+    setupRealtime();
 
     return () => {
-      channel.unsubscribe();
+      supabase.removeChannel(supabase.channel('nodes-changes'));
     };
   }, [session, collapseNode, expandNode, autoSave]);
 
