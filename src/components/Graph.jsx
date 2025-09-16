@@ -1400,16 +1400,20 @@ Would you like to expand these clusters to reveal the node?`;
   useEffect(() => {
     const setupUserSession = async () => {
       const { data: { session } } = await supabase.auth.getSession();
-      // If no session, that's fine - we'll work with local storage only for anonymous users
-      // No need to force anonymous sign-in since it requires CAPTCHA
       setSession(session);
     };
 
     setupUserSession();
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
       setSession(session);
       console.log("Supabase auth state changed:", session);
+      
+      // NEW: Re-auth realtime on session change for RLS/prod reliability
+      if (session?.access_token) {
+        await supabase.realtime.setAuth(session.access_token);
+        console.log("Realtime re-authenticated with new token");
+      }
       
       // Reset CAPTCHA state when user successfully logs in
       if (session?.user?.email) {
@@ -1424,40 +1428,53 @@ Would you like to expand these clusters to reveal the node?`;
     return () => subscription.unsubscribe();
   }, []); // No dependencies needed - only check initial session
 
-  // NEW: Set up realtime subscription for nodes table changes
+  // UPDATED: Set up realtime subscription for nodes table changes (with retry and better logging)
   useEffect(() => {
-    if (!session) return;
+    if (!session?.access_token) return;
 
     const setupRealtime = async () => {
-      // Authenticate the realtime client for RLS
-      await supabase.realtime.setAuth(session.access_token);
+      try {
+        // Authenticate the realtime client for RLS
+        await supabase.realtime.setAuth(session.access_token);
+        console.log("Realtime authenticated with token");
 
-      const channel = supabase.channel('nodes-changes');
-      channel
-        .on(
-          'postgres_changes',
-          { event: 'UPDATE', schema: 'public', table: 'nodes' },
-          async (payload) => {
-            console.log('Realtime change received:', payload);
-            const { new: updatedNode } = payload;
+        const channel = supabase.channel('nodes-changes');
+        channel
+          .on(
+            'postgres_changes',
+            { event: 'UPDATE', schema: 'public', table: 'nodes' },
+            async (payload) => {
+              console.log('Realtime change received:', payload);
+              const { new: updatedNode } = payload;
 
-            if (updatedNode.is_parent) {
-              const localNode = nodes.current.get(updatedNode.id);
-              if (localNode && localNode.is_collapsed !== updatedNode.is_collapsed) {
-                console.log(`Syncing realtime change for node ${updatedNode.id}: is_collapsed ${updatedNode.is_collapsed}`);
-                if (updatedNode.is_collapsed) {
-                  await collapseNode(updatedNode.id);
-                } else {
-                  await expandNode(updatedNode.id);
+              if (updatedNode.is_parent) {
+                const localNode = nodes.current.get(updatedNode.id);
+                if (localNode && localNode.is_collapsed !== updatedNode.is_collapsed) {
+                  console.log(`Syncing realtime change for node ${updatedNode.id}: is_collapsed ${updatedNode.is_collapsed}`);
+                  if (updatedNode.is_collapsed) {
+                    await collapseNode(updatedNode.id);
+                  } else {
+                    await expandNode(updatedNode.id);
+                  }
+                  autoSave();
                 }
-                autoSave();
               }
             }
-          }
-        )
-        .subscribe((status) => {
-          console.log('Realtime subscription status:', status);
-        });
+          )
+          .subscribe((status, err) => {
+            console.log('Realtime subscription status:', status);
+            if (err) {
+              console.error('Realtime subscription error:', err);
+              // NEW: Retry on error (e.g., websocket disconnect in prod)
+              setTimeout(() => {
+                channel.unsubscribe();
+                setupRealtime(); // Recursive retry
+              }, 5000);
+            }
+          });
+      } catch (error) {
+        console.error('Realtime setup error:', error);
+      }
     };
 
     setupRealtime();
@@ -1465,7 +1482,7 @@ Would you like to expand these clusters to reveal the node?`;
     return () => {
       supabase.removeChannel(supabase.channel('nodes-changes'));
     };
-  }, [session, collapseNode, expandNode, autoSave]);
+  }, [session?.access_token, collapseNode, expandNode, autoSave]); // Depend on token for re-setup
 
   // Initializes the vis-network graph and handles events like selection and double-click.
   useEffect(() => {
