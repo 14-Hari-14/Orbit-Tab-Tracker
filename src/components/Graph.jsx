@@ -1441,23 +1441,16 @@ Would you like to expand these clusters to reveal the node?`;
     );
     networkRef.current = network;
 
-    // Add stabilization event handlers to reduce jitter
-    network.on("stabilizationProgress", function (params) {
-      // Optionally show loading indicator during stabilization
-    });
-
+    // Add stabilization event handlers
     network.on("stabilizationIterationsDone", function () {
-      // Network has stabilized, physics can be turned off to prevent jitter
       network.setOptions({ physics: false });
     });
 
-    // Re-enable physics when nodes are added/moved
     network.on("dragStart", function () {
       network.setOptions({ physics: { enabled: true } });
     });
 
     network.on("dragEnd", function () {
-      // Allow physics to settle then disable again
       setTimeout(() => {
         network.setOptions({ physics: false });
       }, 2000);
@@ -1471,26 +1464,13 @@ Would you like to expand these clusters to reveal the node?`;
 
     network.on("doubleClick", async (params) => {
       const nodeId = params.nodes[0];
-      console.log(` Double-click detected on node: ${nodeId}`);
       if (!nodeId) return;
 
       const node = nodes.current.get(nodeId);
-      if (!node) {
-        console.log(` Node not found: ${nodeId}`);
-        return;
-      }
-
-      console.log(` Node details:`, { 
-        id: node.id, 
-        label: node.label, 
-        is_parent: node.is_parent, 
-        is_collapsed: node.is_collapsed,
-        url: node.url 
-      });
+      if (!node) return;
 
       // Check if it's a URL node first
       if (node.url && node.url.trim() !== '') {
-        console.log(` Opening URL: ${node.url}`);
         window.open(node.url, "_blank");
         return;
       }
@@ -1498,56 +1478,20 @@ Would you like to expand these clusters to reveal the node?`;
       // Check if it's a parent node that can be collapsed/expanded
       if (node.is_parent) {
         if (node.is_collapsed) {
-          console.log(` Expanding collapsed node: ${node.label}`);
-          // It's collapsed, so expand it (shallow)
           await expandNode(nodeId);
         } else {
-          console.log(` Collapsing expanded node: ${node.label}`);
-          // It's not collapsed, so collapse it (recursive)
           await collapseNode(nodeId);
         }
         autoSave();
-      } else {
-        console.log(` Node is not a parent, no action taken`);
       }
     });
 
-    // Add visibility change handler to maintain cluster state
-    const handleVisibilityChange = () => {
-      if (document.hidden) {
-        // Tab is hidden - disable physics to save resources
-        network.setOptions({ physics: false });
-      } else {
-        // Tab is visible - just enable physics briefly for layout stability
-        // DON'T auto-sync - let user manually trigger sync if needed
-        network.setOptions({ physics: true });
-        setTimeout(() => {
-          network.setOptions({ physics: false });
-        }, 1000);
-      }
-    };
-
-    const handleWindowFocus = () => {
-      // Just enable physics briefly on window focus - no auto-sync
-      network.setOptions({ physics: true });
-      setTimeout(() => {
-        network.setOptions({ physics: false });
-      }, 1000);
-    };
-
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-
-    // Also handle window focus events for additional safety
-    window.addEventListener('focus', handleWindowFocus);
-
     return () => {
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-      window.removeEventListener('focus', handleWindowFocus);
       nodes.current.off('*', autoSave);
       edges.current.off('*', autoSave);
       network.destroy();
     };
-  }, [isDark, collapseNode, autoSave, syncCollapsedStateFromDatabase, lastLocalChange]);
+  }, [isDark, collapseNode, expandNode, autoSave]); // Removed syncCollapsedStateFromDatabase
 
   // Loads graph data from Supabase when session changes, initializing root if empty.
   // Replace the entire Supabase loading useEffect with this (includes new collapse application after adding data)
