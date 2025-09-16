@@ -1515,46 +1515,29 @@ Would you like to expand these clusters to reveal the node?`;
     // Add visibility change handler to maintain cluster state
     const handleVisibilityChange = () => {
       if (document.hidden) {
-        // Tab is hidden - disable physics
+        // Tab is hidden - disable physics to save resources
         network.setOptions({ physics: false });
       } else {
-        // Tab is visible again - briefly re-enable physics, and sync if no recent local change
-        setTimeout(async () => {
-          const timeSinceLastChange = Date.now() - lastLocalChange;
-          if (timeSinceLastChange < 3000) {
-            console.log('Skipping sync due to recent local change');
-            return;
-          }
-
-          await syncCollapsedStateFromDatabase();
-          network.setOptions({ physics: true });
-          setTimeout(() => {
-            network.setOptions({ physics: false });
-          }, 2000);
-        }, 2000); // Increased delay for DB propagation
+        // Tab is visible - just enable physics briefly for layout stability
+        // DON'T auto-sync - let user manually trigger sync if needed
+        network.setOptions({ physics: true });
+        setTimeout(() => {
+          network.setOptions({ physics: false });
+        }, 1000);
       }
+    };
+
+    const handleWindowFocus = () => {
+      // Just enable physics briefly on window focus - no auto-sync
+      network.setOptions({ physics: true });
+      setTimeout(() => {
+        network.setOptions({ physics: false });
+      }, 1000);
     };
 
     document.addEventListener('visibilitychange', handleVisibilityChange);
 
     // Also handle window focus events for additional safety
-    const handleWindowFocus = () => {
-      // When window regains focus, sync if no recent local change and enable physics briefly
-      setTimeout(async () => {
-        const timeSinceLastChange = Date.now() - lastLocalChange;
-        if (timeSinceLastChange < 3000) {
-          console.log('Skipping sync due to recent local change');
-          return;
-        }
-
-        await syncCollapsedStateFromDatabase();
-        network.setOptions({ physics: true });
-        setTimeout(() => {
-          network.setOptions({ physics: false });
-        }, 2000);
-      }, 2000); // Increased delay for DB propagation
-    };
-
     window.addEventListener('focus', handleWindowFocus);
 
     return () => {
@@ -1756,7 +1739,8 @@ useEffect(() => {
       <FuzzySearch
         isOpen={isSearchOpen}
         onClose={() => setIsSearchOpen(false)}
-        nodes={Array.from(allNodesRef.current.values())} // NEW: Use reference table instead of visible nodes
+        nodes={Array.from(allNodesRef.current.values()) // NEW: Use reference table instead of visible nodes
+        }
         isDark={isDark}
         onSelectNode={handleSmartSearch} // NEW: Use smart search handler
         onEditNode={(nodeId) => {
