@@ -515,6 +515,9 @@ export default function Graph() {
   // overriding browser keyboard shortcuts
   const [isSearchOpen, setIsSearchOpen] = useState(false);
 
+  // NEW: Track last local change timestamp for debouncing sync
+  const [lastLocalChange, setLastLocalChange] = useState(0);
+
   // Replace the local load useEffect with this (now applies collapses after loading)
 useEffect(() => {
   const loadData = async () => {
@@ -656,7 +659,7 @@ useEffect(() => {
   };
 
   //  RECURSIVE COLLAPSE: Collapses a node and all its descendant parent nodes
-  // Replace collapseNode with this (no longer removes edges, only nodes; only updates is_collapsed)
+  // Replace collapseNode with this (no longer removes edges, only nodes; updates is_collapsed)
 const collapseNode = useCallback(async (parentId) => {
   const parentNode = nodes.current.get(parentId);
   if (!parentNode || !parentNode.is_parent || parentNode.is_collapsed) return;
@@ -740,6 +743,8 @@ const collapseNode = useCallback(async (parentId) => {
         note: parentNode.note,
         is_collapsed: true 
       });
+      // NEW: Update last local change timestamp after DB update
+      setLastLocalChange(Date.now());
     }
     
   } catch (error) {
@@ -828,6 +833,8 @@ const expandNode = useCallback(async (parentId) => {
         note: parentNode.note,
         is_collapsed: false 
       });
+      // NEW: Update last local change timestamp after DB update
+      setLastLocalChange(Date.now());
     }
 
     // Enable physics temporarily for layout
@@ -1400,20 +1407,16 @@ Would you like to expand these clusters to reveal the node?`;
   useEffect(() => {
     const setupUserSession = async () => {
       const { data: { session } } = await supabase.auth.getSession();
+      // If no session, that's fine - we'll work with local storage only for anonymous users
+      // No need to force anonymous sign-in since it requires CAPTCHA
       setSession(session);
     };
 
     setupUserSession();
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session);
       console.log("Supabase auth state changed:", session);
-      
-      // NEW: Re-auth realtime on session change for RLS/prod reliability
-      if (session?.access_token) {
-        await supabase.realtime.setAuth(session.access_token);
-        console.log("Realtime re-authenticated with new token");
-      }
       
       // Reset CAPTCHA state when user successfully logs in
       if (session?.user?.email) {
@@ -1427,62 +1430,6 @@ Would you like to expand these clusters to reveal the node?`;
 
     return () => subscription.unsubscribe();
   }, []); // No dependencies needed - only check initial session
-
-  // UPDATED: Set up realtime subscription for nodes table changes (with retry and better logging)
-  useEffect(() => {
-    if (!session?.access_token) return;
-
-    const setupRealtime = async () => {
-      try {
-        // Authenticate the realtime client for RLS
-        await supabase.realtime.setAuth(session.access_token);
-        console.log("Realtime authenticated with token");
-
-        const channel = supabase.channel('nodes-changes');
-        channel
-          .on(
-            'postgres_changes',
-            { event: 'UPDATE', schema: 'public', table: 'nodes' },
-            async (payload) => {
-              console.log('Realtime change received:', payload);
-              const { new: updatedNode } = payload;
-
-              if (updatedNode.is_parent) {
-                const localNode = nodes.current.get(updatedNode.id);
-                if (localNode && localNode.is_collapsed !== updatedNode.is_collapsed) {
-                  console.log(`Syncing realtime change for node ${updatedNode.id}: is_collapsed ${updatedNode.is_collapsed}`);
-                  if (updatedNode.is_collapsed) {
-                    await collapseNode(updatedNode.id);
-                  } else {
-                    await expandNode(updatedNode.id);
-                  }
-                  autoSave();
-                }
-              }
-            }
-          )
-          .subscribe((status, err) => {
-            console.log('Realtime subscription status:', status);
-            if (err) {
-              console.error('Realtime subscription error:', err);
-              // NEW: Retry on error (e.g., websocket disconnect in prod)
-              setTimeout(() => {
-                channel.unsubscribe();
-                setupRealtime(); // Recursive retry
-              }, 5000);
-            }
-          });
-      } catch (error) {
-        console.error('Realtime setup error:', error);
-      }
-    };
-
-    setupRealtime();
-
-    return () => {
-      supabase.removeChannel(supabase.channel('nodes-changes'));
-    };
-  }, [session?.access_token, collapseNode, expandNode, autoSave]); // Depend on token for re-setup
 
   // Initializes the vis-network graph and handles events like selection and double-click.
   useEffect(() => {
@@ -1571,13 +1518,20 @@ Would you like to expand these clusters to reveal the node?`;
         // Tab is hidden - disable physics
         network.setOptions({ physics: false });
       } else {
-        // Tab is visible again - briefly re-enable physics (removed sync to avoid races)
-        setTimeout(() => {
+        // Tab is visible again - briefly re-enable physics, and sync if no recent local change
+        setTimeout(async () => {
+          const timeSinceLastChange = Date.now() - lastLocalChange;
+          if (timeSinceLastChange < 3000) {
+            console.log('Skipping sync due to recent local change');
+            return;
+          }
+
+          await syncCollapsedStateFromDatabase();
           network.setOptions({ physics: true });
           setTimeout(() => {
             network.setOptions({ physics: false });
           }, 2000);
-        }, 100);
+        }, 2000); // Increased delay for DB propagation
       }
     };
 
@@ -1585,13 +1539,20 @@ Would you like to expand these clusters to reveal the node?`;
 
     // Also handle window focus events for additional safety
     const handleWindowFocus = () => {
-      // When window regains focus, enable physics briefly (removed sync to avoid races)
-      setTimeout(() => {
+      // When window regains focus, sync if no recent local change and enable physics briefly
+      setTimeout(async () => {
+        const timeSinceLastChange = Date.now() - lastLocalChange;
+        if (timeSinceLastChange < 3000) {
+          console.log('Skipping sync due to recent local change');
+          return;
+        }
+
+        await syncCollapsedStateFromDatabase();
         network.setOptions({ physics: true });
         setTimeout(() => {
           network.setOptions({ physics: false });
         }, 2000);
-      }, 100);
+      }, 2000); // Increased delay for DB propagation
     };
 
     window.addEventListener('focus', handleWindowFocus);
@@ -1603,7 +1564,7 @@ Would you like to expand these clusters to reveal the node?`;
       edges.current.off('*', autoSave);
       network.destroy();
     };
-  }, [isDark, collapseNode, autoSave]);
+  }, [isDark, collapseNode, autoSave, syncCollapsedStateFromDatabase, lastLocalChange]);
 
   // Loads graph data from Supabase when session changes, initializing root if empty.
   // Replace the entire Supabase loading useEffect with this (includes new collapse application after adding data)
