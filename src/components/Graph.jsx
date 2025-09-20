@@ -73,20 +73,20 @@ const generateNodeTitle = (node) => {
 };
 
 // Creates initial graph data with a root node (not currently used, as data is fetched from Supabase).
-const createInitialData = () => {
-  const initialNodes = new DataSet([{ 
-    id: 1, 
-    label: "Root", 
-    shape: "circle", 
-    value: 25, 
-    is_parent: true, 
-    note: "Start building your knowledge graph from here!" 
-  }]);
-  initialNodes.forEach(node => {
-    initialNodes.update({ ...node, title: generateNodeTitle(node) });
-  });
-  return { nodes: initialNodes, edges: new DataSet([]) };
-};
+// const createInitialData = () => {
+//   const initialNodes = new DataSet([{ 
+//     id: 1, 
+//     label: "Root", 
+//     shape: "circle", 
+//     value: 25, 
+//     is_parent: true, 
+//     note: "Start building your knowledge graph from here!" 
+//   }]);
+//   initialNodes.forEach(node => {
+//     initialNodes.update({ ...node, title: generateNodeTitle(node) });
+//   });
+//   return { nodes: initialNodes, edges: new DataSet([]) };
+// };
 
 // --- Sub-Components ---
 // Toggles between dark and light themes.
@@ -866,61 +866,63 @@ const expandNode = useCallback(async (parentId) => {
     return Array.from(descendants);
   }, []);
 
-  //  SYNC COLLAPSED STATE: Syncs current graph state with database state
+  //  NEW: Replace the old sync function with this smarter version
   const syncCollapsedStateFromDatabase = useCallback(async () => {
     if (!session) return;
 
+    // Prevent sync if a local change happened recently
+    if (Date.now() - lastLocalChange < 3000) {
+      console.log(' Sync skipped: recent local change detected.');
+      return;
+    }
+
     try {
-      console.log(' Syncing collapsed state from database...');
-      const { nodes: dbNodes } = await fetchGraphData();
-      
-      // Create a map of database collapsed states
-      const dbCollapsedState = new Map();
-      dbNodes.forEach(node => {
-        if (node.is_parent) {
-          dbCollapsedState.set(node.id, node.is_collapsed);
-        }
-      });
+      console.log('🧠 Syncing collapsed state from database...');
+      const { nodes: dbNodes, edges: dbEdges } = await fetchGraphData();
+      if (!dbNodes || dbNodes.length === 0) return;
 
-      // Compare current visual state with database state and sync
-      const currentNodes = nodes.current.get();
-      const nodesToCollapse = [];
-      const nodesToExpand = [];
+      const dbStateMap = new Map(dbNodes.map(n => [n.id, n]));
+      const visibleNodeIds = new Set(nodes.current.getIds());
 
-      currentNodes.forEach(node => {
-        if (node.is_parent && dbCollapsedState.has(node.id)) {
-          const dbIsCollapsed = dbCollapsedState.get(node.id);
-          const currentIsCollapsed = node.is_collapsed;
+      // Find the parent of any given node
+      const getParentId = (childId) => {
+        const edge = dbEdges.find(e => e.to === childId);
+        return edge ? edge.from : null;
+      };
 
-          if (dbIsCollapsed && !currentIsCollapsed) {
-            // Database says collapsed, but visually expanded - collapse it
-            nodesToCollapse.push(node.id);
-          } else if (!dbIsCollapsed && currentIsCollapsed) {
-            // Database says expanded, but visually collapsed - expand it
-            nodesToExpand.push(node.id);
+      for (const dbNode of dbNodes) {
+        if (!dbNode.is_parent) continue;
+
+        const localNode = allNodesRef.current.get(dbNode.id);
+        if (!localNode) continue; // Node doesn't exist locally, skip
+
+        const dbIsCollapsed = dbNode.is_collapsed;
+        const localIsCollapsed = localNode.is_collapsed;
+
+        if (dbIsCollapsed !== localIsCollapsed) {
+          // Check if the node's parent is visible or if it's a root node
+          const parentId = getParentId(dbNode.id);
+          const isParentVisible = !parentId || visibleNodeIds.has(parentId);
+
+          if (isParentVisible) {
+            if (dbIsCollapsed && !localIsCollapsed) {
+              console.log(`🧠 Sync: Collapsing ${dbNode.label} to match DB.`);
+              await collapseNode(dbNode.id);
+            } else if (!dbIsCollapsed && localIsCollapsed) {
+              console.log(`🧠 Sync: Expanding ${dbNode.label} to match DB.`);
+              await expandNode(dbNode.id);
+            }
+          } else {
+            console.log(`🧠 Sync skipped for ${dbNode.label}: parent is not visible.`);
           }
         }
-      });
-
-      // Apply the sync operations
-      for (const nodeId of nodesToCollapse) {
-        console.log(` Syncing: Collapsing node ${nodeId} to match database`);
-        await collapseNode(nodeId);
       }
-      
-      for (const nodeId of nodesToExpand) {
-        console.log(` Syncing: Expanding node ${nodeId} to match database`);
-        await expandNode(nodeId);
-      }
-
-      if (nodesToCollapse.length > 0 || nodesToExpand.length > 0) {
-        console.log(` Sync complete: ${nodesToCollapse.length} collapsed, ${nodesToExpand.length} expanded`);
-      }
+      console.log('🧠 Sync complete.');
 
     } catch (error) {
       console.error('Error syncing collapsed state:', error);
     }
-  }, [session, fetchGraphData, collapseNode, expandNode]);
+  }, [session, lastLocalChange, collapseNode, expandNode]);
 
   // Opens the modal for adding/editing nodes or notes.
   const openModal = (mode, nodeId) => {
@@ -962,6 +964,8 @@ const expandNode = useCallback(async (parentId) => {
         url: formData.url, 
         note: formData.note, 
         is_parent: formData.isParent, 
+        is_collapsed: false,
+        is_root: false, // Explicitly set is_root to false for child nodes
         shape: formData.isParent ? 'ellipse' : 'box',
         value: DEFAULT_NODE_VALUE
       };
@@ -1002,6 +1006,7 @@ const expandNode = useCallback(async (parentId) => {
         note: formData.note, 
         is_parent: true, 
         is_root: true, 
+        is_collapsed: false, // Set default collapsed state
         shape: 'circle', 
         value: 25
       };
@@ -1493,6 +1498,22 @@ Would you like to expand these clusters to reveal the node?`;
     };
   }, [isDark, collapseNode, expandNode, autoSave]); // Removed syncCollapsedStateFromDatabase
 
+  // NEW: Add an effect to sync when the tab becomes visible
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        console.log('Tab is visible, triggering sync.');
+        syncCollapsedStateFromDatabase();
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [syncCollapsedStateFromDatabase]); // Re-run if the sync function changes
+
   // Loads graph data from Supabase when session changes, initializing root if empty.
   // Replace the entire Supabase loading useEffect with this (includes new collapse application after adding data)
 useEffect(() => {
@@ -1506,6 +1527,7 @@ useEffect(() => {
           label: "Root", 
           is_parent: true, 
           is_root: true, 
+          is_collapsed: false, // Set default collapsed state
           shape: "circle", 
           value: 25, 
           note: "Start here!" 
@@ -1573,14 +1595,11 @@ useEffect(() => {
         }
       }
       
-      // Sync any remaining mismatches (e.g., for multi-tab changes)
-      await syncCollapsedStateFromDatabase();
-      
       autoSave(); // Save fetched data to local as backup
     };
     loadAndInitializeGraph();
   }
-}, [session, autoSave, syncCollapsedStateFromDatabase]);
+}, [session, autoSave]); // REMOVED syncCollapsedStateFromDatabase from dependencies
 
   // Updates network options when theme changes.
   useEffect(() => {
