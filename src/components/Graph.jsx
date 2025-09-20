@@ -518,6 +518,10 @@ export default function Graph() {
   // NEW: Track last local change timestamp for debouncing sync
   const [lastLocalChange, setLastLocalChange] = useState(0);
 
+  // NEW: Create refs to hold stable references to functions
+  const reapplyCollapsedStateRef = useRef();
+  const syncCollapsedStateFromDatabaseRef = useRef();
+
   // Replace the local load useEffect with this (now applies collapses after loading)
 useEffect(() => {
   const loadData = async () => {
@@ -679,6 +683,12 @@ useEffect(() => {
     }
     console.log("Visual state re-applied.");
   }, [collapseNode, getBottomUpCollapsedOrder, allNodesRef, edges]);
+
+  // NEW: Keep the function refs updated
+  useEffect(() => {
+    reapplyCollapsedStateRef.current = reapplyCollapsedState;
+    syncCollapsedStateFromDatabaseRef.current = syncCollapsedStateFromDatabase;
+  });
 
   //  RECURSIVE COLLAPSE: Collapses a node and all its descendant parent nodes
   // Replace collapseNode with this (no longer removes edges, only nodes; updates is_collapsed)
@@ -1525,10 +1535,9 @@ Would you like to expand these clusters to reveal the node?`;
     const handleVisibilityChange = async () => {
       if (document.visibilityState === 'visible') {
         console.log('Tab is visible, re-applying state and triggering sync.');
-        // First, immediately fix the visual state from our local reference
-        await reapplyCollapsedState();
-        // Then, check for updates from the database
-        syncCollapsedStateFromDatabase();
+        // Use the refs to call the functions
+        await reapplyCollapsedStateRef.current();
+        syncCollapsedStateFromDatabaseRef.current();
       }
     };
 
@@ -1537,7 +1546,7 @@ Would you like to expand these clusters to reveal the node?`;
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [syncCollapsedStateFromDatabase, reapplyCollapsedState]); // Re-run if the functions change
+  }, []); // REMOVED dependencies to make the effect stable
 
   // Loads graph data from Supabase when session changes, initializing root if empty.
   // Replace the entire Supabase loading useEffect with this (includes new collapse application after adding data)
