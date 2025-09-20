@@ -658,6 +658,28 @@ useEffect(() => {
     return order;
   };
 
+  // NEW: Function to force the visual state to match the reference state
+  const reapplyCollapsedState = useCallback(async () => {
+    console.log("Re-applying collapsed state to fix visual glitches...");
+    const allNodes = Array.from(allNodesRef.current.values());
+    const collapsedParents = new Set(
+      allNodes
+        .filter(n => n.is_parent && n.is_collapsed)
+        .map(n => n.id)
+    );
+
+    if (collapsedParents.size > 0) {
+      // We need to get all edges to calculate the collapse order correctly
+      const allEdges = edges.current.get({ returnType: 'Array' });
+      const order = getBottomUpCollapsedOrder(collapsedParents, allEdges);
+      for (const parentId of order) {
+        // Use collapseNode to ensure the UI is correctly updated
+        await collapseNode(parentId);
+      }
+    }
+    console.log("Visual state re-applied.");
+  }, [collapseNode, getBottomUpCollapsedOrder, allNodesRef, edges]);
+
   //  RECURSIVE COLLAPSE: Collapses a node and all its descendant parent nodes
   // Replace collapseNode with this (no longer removes edges, only nodes; updates is_collapsed)
 const collapseNode = useCallback(async (parentId) => {
@@ -1500,9 +1522,12 @@ Would you like to expand these clusters to reveal the node?`;
 
   // NEW: Add an effect to sync when the tab becomes visible
   useEffect(() => {
-    const handleVisibilityChange = () => {
+    const handleVisibilityChange = async () => {
       if (document.visibilityState === 'visible') {
-        console.log('Tab is visible, triggering sync.');
+        console.log('Tab is visible, re-applying state and triggering sync.');
+        // First, immediately fix the visual state from our local reference
+        await reapplyCollapsedState();
+        // Then, check for updates from the database
         syncCollapsedStateFromDatabase();
       }
     };
@@ -1512,7 +1537,7 @@ Would you like to expand these clusters to reveal the node?`;
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [syncCollapsedStateFromDatabase]); // Re-run if the sync function changes
+  }, [syncCollapsedStateFromDatabase, reapplyCollapsedState]); // Re-run if the functions change
 
   // Loads graph data from Supabase when session changes, initializing root if empty.
   // Replace the entire Supabase loading useEffect with this (includes new collapse application after adding data)
