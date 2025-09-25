@@ -528,6 +528,24 @@ export default function Graph() {
     loadData();
   }, []);
 
+    const saveNodePositions = useCallback(() => {
+    if (networkRef.current) {
+      const positions = networkRef.current.getPositions();
+      Object.keys(positions).forEach(nodeId => {
+        const node = allNodesRef.current.get(nodeId);
+        if (node) {
+          allNodesRef.current.set(nodeId, {
+            ...node,
+            x: positions[nodeId].x,
+            y: positions[nodeId].y,
+          });
+        }
+      });
+      // Also save the updated positions to local storage
+      autoSave(); 
+    }
+  }, [autoSave]); // Depends on autoSave to persist changes
+
   const autoSave = useCallback(() => {
     saveDataToLocalStorage(nodes.current, edges.current, allNodesRef.current);
   }, []);
@@ -735,6 +753,8 @@ export default function Graph() {
           is_collapsed: child.is_collapsed,
           url: child.url,
           note: child.note,
+          x: child.x, // <-- ADD THIS
+          y: child.y, // <-- ADD THIS
           title: generateNodeTitle(child)
         }));
 
@@ -1293,7 +1313,7 @@ Would you like to expand these clusters to reveal the node?`;
   }, []);
 
   useEffect(() => {
-    const options = getNetworkOptions(isDark);
+     const options = getNetworkOptions(isDark);
     const network = new Network(
       containerRef.current,
       { nodes: nodes.current, edges: edges.current },
@@ -1303,6 +1323,7 @@ Would you like to expand these clusters to reveal the node?`;
 
     network.on("stabilizationIterationsDone", function () {
       network.setOptions({ physics: false });
+      saveNodePositions(); // <-- ADD THIS
     });
 
     network.on("dragStart", function () {
@@ -1313,6 +1334,7 @@ Would you like to expand these clusters to reveal the node?`;
       setTimeout(() => {
         network.setOptions({ physics: false });
       }, 2000);
+      saveNodePositions(); // <-- ADD THIS
     });
 
     nodes.current.on('*', autoSave);
@@ -1344,11 +1366,13 @@ Would you like to expand these clusters to reveal the node?`;
     });
 
     return () => {
+      saveNodePositions(); // <-- ADD THIS to save positions on unmount
       nodes.current.off('*', autoSave);
       edges.current.off('*', autoSave);
       network.destroy();
     };
-  }, [isDark, autoSave, collapseNode, expandNode]);
+  }, [isDark, autoSave, collapseNode, expandNode, saveNodePositions]); // <-- Add saveNodePositions to dependencies
+
 
   useEffect(() => {
     const handleVisibilityChange = async () => {
@@ -1370,6 +1394,7 @@ Would you like to expand these clusters to reveal the node?`;
       const loadAndInitializeGraph = async () => {
         const { nodes: fetchedNodes, edges: fetchedEdges } = await fetchGraphData();
 
+        // Handle case where a user has no nodes yet
         if (fetchedNodes.length === 0) {
           const rootNode = { 
             id: Date.now(), 
@@ -1384,14 +1409,9 @@ Would you like to expand these clusters to reveal the node?`;
           const savedRoot = await addNodeToSupabase(rootNode);
           if (savedRoot) {
               const displayNode = { 
-                id: savedRoot.id, 
-                label: savedRoot.label, 
-                shape: savedRoot.shape, 
-                value: savedRoot.value || 25,
-                is_parent: savedRoot.is_parent,
-                is_root: savedRoot.is_root,
-                url: savedRoot.url,
-                note: savedRoot.note,
+                id: savedRoot.id, label: savedRoot.label, shape: savedRoot.shape, 
+                value: savedRoot.value || 25, is_parent: savedRoot.is_parent,
+                is_root: savedRoot.is_root, url: savedRoot.url, note: savedRoot.note,
                 title: generateNodeTitle(savedRoot) 
               };
               nodes.current.clear();
@@ -1402,50 +1422,103 @@ Would you like to expand these clusters to reveal the node?`;
               allNodesRef.current.set(savedRoot.id, savedRoot);
           }
         } else {
-          const displayNodes = fetchedNodes.map(n => ({ 
-            id: n.id, 
-            label: n.label, 
-            shape: n.shape, 
-            value: n.value || DEFAULT_NODE_VALUE,
-            is_parent: n.is_parent,
-            is_collapsed: n.is_collapsed,
-            url: n.url,
-            note: n.note,
-            title: generateNodeTitle(n) 
-          }));
-          nodes.current.clear();
-          edges.current.clear();
-          nodes.current.add(displayNodes);
-          edges.current.add(fetchedEdges);
-          
+          // --- START: Corrected Graph Initialization Logic ---
+
+          // Step 1: Populate the main reference cache with all nodes from the database.
+          // This ensures we have the complete data, including saved positions from localStorage.
+          const localData = loadDataFromLocalStorage();
+          const localPositions = new Map(localData?.all_nodes?.map(n => [n.id, { x: n.x, y: n.y }]) || []);
+
           allNodesRef.current.clear();
           fetchedNodes.forEach(node => {
+            const pos = localPositions.get(node.id);
             allNodesRef.current.set(node.id, {
               ...node,
+              x: pos?.x,
+              y: pos?.y,
               value: node.value || DEFAULT_NODE_VALUE,
               title: generateNodeTitle(node)
             });
           });
 
-          const collapsedParents = new Set(
-            fetchedNodes
-              .filter(n => n.is_parent && n.is_collapsed)
-              .map(n => n.id)
+          // Step 2: Identify which nodes should be hidden because their parents are collapsed.
+          const collapsedParentIds = new Set(
+            fetchedNodes.filter(n => n.is_parent && n.is_collapsed).map(n => n.id)
           );
-          
-          if (collapsedParents.size > 0) {
-            const order = getBottomUpCollapsedOrder(collapsedParents, fetchedEdges);
-            for (const parentId of order) {
-              await collapseNode(parentId);
+
+          const descendantMap = new Map();
+          fetchedEdges.forEach(edge => {
+            if (!descendantMap.has(edge.from)) {
+              descendantMap.set(edge.from, []);
             }
-          }
+            descendantMap.get(edge.from).push(edge.to);
+          });
+
+          const allDescendantsToHide = new Set();
+          const collectAllDescendants = (parentId) => {
+            const children = descendantMap.get(parentId) || [];
+            for (const childId of children) {
+              if (!allDescendantsToHide.has(childId)) {
+                allDescendantsToHide.add(childId);
+                collectAllDescendants(childId);
+              }
+            }
+          };
+          collapsedParentIds.forEach(collectAllDescendants);
+
+          // Step 3: Create the final list of nodes that will actually be visible on the graph.
+          const visibleNodes = fetchedNodes
+            .filter(n => !allDescendantsToHide.has(n.id))
+            .map(n => {
+              const fullNodeData = allNodesRef.current.get(n.id);
+
+              // If this node is a collapsed parent, update its label and appearance
+              if (collapsedParentIds.has(n.id)) {
+                const directChildrenCount = (descendantMap.get(n.id) || []).length;
+                const clusterColors = [
+                    { bg: '#FF6B6B', border: '#FF5252' }, { bg: '#4ECDC4', border: '#26A69A' },
+                    { bg: '#45B7D1', border: '#2196F3' }, { bg: '#96CEB4', border: '#66BB6A' },
+                    { bg: '#FECA57', border: '#FF9800' }, { bg: '#FF9FF3', border: '#E91E63' }
+                ];
+                let hash = 0;
+                String(n.id).split('').forEach(char => { hash = ((hash << 5) - hash + char.charCodeAt(0)) | 0; });
+                const color = clusterColors[Math.abs(hash) % clusterColors.length];
+
+                return {
+                  ...fullNodeData, // Use full data to include title, etc.
+                  label: `${n.label} (+${directChildrenCount})`,
+                  shape: 'circle',
+                  color: { background: color.bg, border: color.border },
+                  font: { color: '#000000' },
+                  value: Math.max(n.value || 25, directChildrenCount * 5),
+                  x: fullNodeData?.x, // Restore position
+                  y: fullNodeData?.y, // Restore position
+                };
+              }
+
+              // For all other visible nodes, just return their full data
+              return {
+                ...fullNodeData,
+                x: fullNodeData?.x, // Restore position
+                y: fullNodeData?.y, // Restore position
+              };
+            });
+          
+          // Step 4: Clear the network and add only the visible nodes and all edges.
+          nodes.current.clear();
+          edges.current.clear();
+          nodes.current.add(visibleNodes);
+          edges.current.add(fetchedEdges); // vis-network ignores edges connected to hidden nodes.
+
+          // --- END: Corrected Logic ---
         }
         
         autoSave();
       };
+      
       loadAndInitializeGraph();
     }
-  }, [session, autoSave]);
+  }, [session, autoSave]); // Dependencies are correct
 
   useEffect(() => {
     if (networkRef.current) { 
