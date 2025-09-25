@@ -37,6 +37,7 @@ const loadDataFromLocalStorage = () => {
   }
 };
 
+// Function to generate the board which shows content of node on hover
 const generateNodeTitle = (node) => {
   const container = document.createElement('div');
   container.style.padding = '8px';
@@ -67,6 +68,7 @@ const generateNodeTitle = (node) => {
   return container;
 };
 
+// Function to toggle theme
 const ThemeToggle = ({ isDark, onToggle }) => (
   <div style={getThemeToggleStyle(isDark)} onClick={onToggle} title="Toggle theme">
     <img 
@@ -77,6 +79,7 @@ const ThemeToggle = ({ isDark, onToggle }) => (
   </div>
 );
 
+// Function that displays the top left part of the website which shows project name
 const ProjectHeader = ({ isDark }) => (
   <div
     style={{
@@ -117,6 +120,7 @@ const ProjectHeader = ({ isDark }) => (
   </div>
 );
 
+// Function to show all the different buttons to make changes to graph
 const FixedToolbar = ({ onAddRoot, onAdd, onDelete, onEdit, onNote, onShowShortcuts, isNodeSelected, selectedNodeLabel, isDark }) => {
   const buttonStyle = { 
     padding: '10px 16px', 
@@ -219,6 +223,7 @@ const FixedToolbar = ({ onAddRoot, onAdd, onDelete, onEdit, onNote, onShowShortc
   );
 };
 
+// Button to sign in using supabase
 const LoginButton = ({ isDark, session, onAuthClick }) => {
   const isLoggedIn = !!session;
   const userEmail = session?.user?.email?.split('@')[0] || 'Anonymous';
@@ -257,6 +262,8 @@ const LoginButton = ({ isDark, session, onAuthClick }) => {
     </button>
   );
 };
+
+
 
 const KeyboardFeedback = ({ feedback, isDark }) => {
   if (!feedback) return null;

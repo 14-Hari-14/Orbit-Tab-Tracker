@@ -10,6 +10,10 @@
 - Local storage auto-save
 - Modal dialogs for node editing
 - Toolbar with action buttons
+- backend with supabase
+- Search nodes by name
+- Keyboard shortcuts (Delete, Ctrl+N, Ctrl+E, Esc)
+- Export/import JSON
 
 ## 🔧 Current Issues
 
@@ -19,10 +23,6 @@
 
 ## 🎯 Next Up (Before Launch)
 
-- [ ] backend with supabase
-- [ ] Search nodes by name
-- [ ] Keyboard shortcuts (Delete, Ctrl+N, Ctrl+E, Esc)
-- [ ] Export/import JSON
 - [ ] Zoom controls (fit, center, reset)
 - [ ] Better form validation
 - [ ] Rate limiting for backend signups
@@ -31,7 +31,6 @@
 ## 💡 Later Ideas
 
 - [ ] Undo/redo
-- [ ] Node categories/tags
 - [ ] Multiple graph projects
 - [ ] Minimap for navigation
 - [ ] Node templates
@@ -44,15 +43,6 @@
 - [ ] Clusters selection failed one time i dont know why
 - [ ] Toolbar overlaps on small screens
 
-## 🚀 Launch Checklist
-
-- [ ] Add search + keyboard shortcuts + export
-- [ ] Test on different browsers
-- [ ] Fix mobile issues
-- [ ] Add loading states
-- [ ] Write basic docs
-
 ---
 
-**Status**: Core app works, needs polish before launch
-**Focus**: Search functionality first
+**Status**: One main bug fix before launch to left
