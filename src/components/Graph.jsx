@@ -18,7 +18,7 @@ import { WarningBanner } from './WarningBanner';
 // Hooks and Utils
 import { useGraphData } from '../hooks/useGraphData';
 import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
-import { getNetworkOptions } from "../styles";
+import { getNetworkOptions } from "./styles";
 
 export default function Graph({ session }) {
   // --- Refs ---
