@@ -1,6 +1,4 @@
-// File: src/api.js
-
-import { supabase } from './supabaseClient';
+import { supabase } from './components/supabaseClient';
 
 /**
  * Fetches all nodes and edges for the currently logged-in user.
