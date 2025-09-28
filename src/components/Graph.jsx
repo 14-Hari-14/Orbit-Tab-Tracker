@@ -5,7 +5,7 @@ import { Network } from "vis-network/standalone";
 import { supabase } from './supabaseClient';
 
 // UI Components
-import { GridBg } from '../ui/GridBg';
+import { GridBg } from './ui/GridBg';
 import { NodeModal } from "./NodeModal";
 import { ProjectHeader } from './ProjectHeader';
 import { ThemeToggle } from './ThemeToggle';
