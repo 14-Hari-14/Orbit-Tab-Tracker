@@ -61,10 +61,10 @@ export const FixedToolbar = ({ onAddRoot, onAdd, onDelete, onEdit, onNote, onSho
       
       <button 
         onClick={onDelete} 
-        disabled={!isNodeSelected || selectedNodeLabel === 'Root'} 
-        style={isNodeSelected && selectedNodeLabel !== 'Root' ? { ...buttonStyle, backgroundColor: '#dc3545' } : disabledButtonStyle} 
-        onMouseOver={(e) => isNodeSelected && selectedNodeLabel !== 'Root' && (e.currentTarget.style.backgroundColor = '#c82333')} 
-        onMouseOut={(e) => isNodeSelected && selectedNodeLabel !== 'Root' && (e.currentTarget.style.backgroundColor = '#dc3545')} 
+        disabled={!isNodeSelected}
+        style={isNodeSelected ? { ...buttonStyle, backgroundColor: '#dc3545' } : disabledButtonStyle} 
+        onMouseOver={(e) => isNodeSelected && (e.currentTarget.style.backgroundColor = '#c82333')} 
+        onMouseOut={(e) => isNodeSelected && (e.currentTarget.style.backgroundColor = '#dc3545')} 
       > 
         <span>🗑️</span> Delete Node 
       </button> 

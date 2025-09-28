@@ -1,4 +1,4 @@
-// File: src/hooks/useGraphData.js (New File)
+// File: src/hooks/useGraphData.js (Updated)
 
 import { useState, useEffect, useCallback } from 'react';
 import { DataSet } from 'vis-network/standalone';
@@ -13,40 +13,39 @@ export const useGraphData = (session) => {
         edges: new DataSet([]),
     });
 
+    // This effect now ONLY depends on the session, preventing re-runs.
     useEffect(() => {
         const loadData = async () => {
             setLoading(true);
-            const nodes = new DataSet([]);
-            const edges = new DataSet([]);
+            const nodesDataSet = new DataSet([]);
+            const edgesDataSet = new DataSet([]);
 
             if (session) {
                 const { nodes: dbNodes, edges: dbEdges } = await api.fetchGraphData();
 
                 if (dbNodes.length === 0) {
-                    // If the user is new and has no data, create a root node for them.
-                    const rootNodeData = { label: "Root", is_parent: true };
+                    const rootNodeData = { label: "Root", is_parent: true, shape: 'circle'};
                     const newRoot = await api.addNode(rootNodeData);
-                    nodes.add(newRoot);
+                    nodesDataSet.add(newRoot);
                 } else {
-                    nodes.add(dbNodes);
+                    nodesDataSet.add(dbNodes);
                     const formattedEdges = dbEdges.map(e => ({ ...e, from: e.from_node, to: e.to_node }));
-                    edges.add(formattedEdges);
+                    edgesDataSet.add(formattedEdges);
                 }
 
             } else {
                 const localData = loadDataFromLocalStorage();
                 if (localData && localData.nodes?.length > 0) {
-                    nodes.add(localData.nodes);
-                    edges.add(localData.edges);
+                    nodesDataSet.add(localData.nodes);
+                    edgesDataSet.add(localData.edges);
                 } else {
-                    // If no local storage, create a default graph.
                     const { nodes: initialNodes, edges: initialEdges } = createInitialData();
-                    nodes.add(initialNodes.get());
-                    edges.add(initialEdges.get());
+                    nodesDataSet.add(initialNodes.get());
+                    edgesDataSet.add(initialEdges.get());
                 }
             }
 
-            setData({ nodes, edges });
+            setData({ nodes: nodesDataSet, edges: edgesDataSet });
             setLoading(false);
         };
 
@@ -71,13 +70,37 @@ export const useGraphData = (session) => {
         }
     }, [session, data]);
 
+    // --- NEW: Fully implemented handleDeleteNode ---
     const handleDeleteNode = useCallback(async (nodeId) => {
-        // Note: A full implementation would handle deleting descendants.
+        if (!nodeId) return;
+
+        // Helper to get all descendants of a node
+        const getAllDescendants = (id) => {
+            let children = data.edges.get({ filter: edge => edge.from === id }).map(edge => edge.to);
+            let descendants = [...children];
+            children.forEach(childId => {
+                descendants = [...descendants, ...getAllDescendants(childId)];
+            });
+            return descendants;
+        };
+
+        const nodesToDelete = [nodeId, ...getAllDescendants(nodeId)];
+
         if (session) {
-            await api.deleteNode(nodeId);
-            data.nodes.remove(nodeId);
+            // In Supabase, we only need to delete the parent nodes.
+            // The `ON DELETE CASCADE` in our database schema will handle deleting all children.
+            // For safety, we can delete all explicitly, starting from the children.
+            try {
+                for (const id of nodesToDelete.reverse()) {
+                    await api.deleteNode(id);
+                }
+                data.nodes.remove(nodesToDelete);
+            } catch (error) {
+                console.error("Failed to delete nodes from Supabase:", error);
+            }
         } else {
-            data.nodes.remove(nodeId);
+            // For local storage, we just remove them from the DataSet
+            data.nodes.remove(nodesToDelete);
             saveDataToLocalStorage(data.nodes, data.edges);
         }
     }, [session, data]);
