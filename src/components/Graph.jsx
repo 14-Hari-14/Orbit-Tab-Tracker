@@ -12,12 +12,18 @@ import { FixedToolbar } from './FixedToolbar';
 import { ShortcutsModal } from './ShortcutsModal'; 
 import FuzzySearch from './FuzzySearch'; 
 import { Notification } from './Notification';
+import { WarningBanner } from './WarningBanner';
 
 // Utilities & Hooks
 import { loadDataFromLocalStorage } from '../utils/localStorage';
 import { createInitialData, generateNodeTitle } from '../utils/graphUtils';
 import { useVisNetwork } from '../hooks/useVisNetwork';
-import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts'; 
+import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
+
+// Auth
+// import HCaptcha from '@hcaptcha/react-hcaptcha';
+import { supabase } from '../supabaseClient';
+import { AuthPage } from './components/AuthPage'; 
 
 const getInitialData = () => {
   const savedData = loadDataFromLocalStorage();

@@ -1,13 +1,29 @@
-import React from "react";
-import Graph from "./components/Graph";
+import { useState, useEffect } from 'react';
+import { supabase } from './supabaseClient';
+import Graph from './components/Graph';
 
-function App() {
-  return (
-    <div style={{ padding: "20px" }}>
-      <h1>Orbit</h1>
-      <Graph />
-    </div>
-  );
+export default function App() {
+  const [session, setSession] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session);
+      setLoading(false);
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session);
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
+
+  if (loading) {
+    return <div>Loading...</div>;
+  }
+
+  // Always render Graph, passing session as a prop.
+  // The Graph component will decide how to behave based on this.
+  return <Graph session={session} />;
 }
-
-export default App;
