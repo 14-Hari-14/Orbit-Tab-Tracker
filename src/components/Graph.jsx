@@ -22,8 +22,8 @@ import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
 
 // Auth
 // import HCaptcha from '@hcaptcha/react-hcaptcha';
-import { supabase } from '../supabaseClient';
-import { AuthPage } from './components/AuthPage'; 
+import { supabase } from './supabaseClient';
+import { AuthPage } from './AuthPage'; 
 
 const getInitialData = () => {
   const savedData = loadDataFromLocalStorage();

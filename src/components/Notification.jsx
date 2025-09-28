@@ -23,7 +23,6 @@ export const Notification = ({ message, type = 'error', onClose }) => {
 
   const baseStyle = {
     position: 'fixed',
-    top: '20px',
     left: '50%',
     transform: 'translateX(-50%)',
     padding: '12px 20px',
