@@ -2,7 +2,7 @@
 
 import { useState, useMemo, useCallback, useRef, useEffect } from "react";
 import { Network } from "vis-network/standalone";
-import { supabase } from '../supabaseClient';
+import { supabase } from './supabaseClient';
 
 // UI Components
 import { GridBg } from '../ui/GridBg';
