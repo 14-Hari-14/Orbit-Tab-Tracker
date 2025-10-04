@@ -37,6 +37,20 @@ export default function Graph({ session }) {
 
   const { visibleNodes, visibleEdges } = useMemo(() => {
     if (loading) return { visibleNodes: new DataSet([]), visibleEdges: new DataSet([]) };
+
+    const getClusterColor = (nodeId) => {
+      const colors = [
+        { background: '#4c51bf', border: '#434190' }, // Indigo
+        { background: '#dd6b20', border: '#c05621' }, // Orange
+        { background: '#38a169', border: '#2f855a' }, // Green
+        { background: '#d53f8c', border: '#b83280' }, // Pink
+        { background: '#00b5d8', border: '#00a3c4' }, // Cyan
+      ];
+      const index = Math.abs(nodeId) % colors.length;
+      return colors[index];
+    };
+
+
     const getDirectChildren = (parentId) => Array.from(allEdges.values()).filter(e => e.from === parentId);
     const getAllDescendants = (parentId) => {
       const descendants = new Set();
@@ -56,6 +70,8 @@ export default function Graph({ session }) {
         let displayNode = { ...node, shape: node.is_parent ? 'circle' : 'box', value: node.is_parent ? 25 : 20, title: generateNodeTitle(node) };
         if (collapsedIds.has(node.id)) {
           displayNode.label = `${node.label} (+${getDirectChildren(node.id).length})`;
+          displayNode.color = getClusterColor(node.id);
+          displayNode.font = {color: '#ffffff'};
         }
         nodesToDisplay.push(displayNode);
       }
