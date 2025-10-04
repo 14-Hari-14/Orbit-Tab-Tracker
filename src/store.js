@@ -8,6 +8,7 @@ import { createInitialData } from './utils/graphUtils';
 export const useGraphStore = create((set, get) => ({
     // --- STATE ---
     loading: true,
+    isInitialLoad: true,
     allNodes: new Map(),
     allEdges: new Map(),
     collapsedIds: new Set(),
@@ -17,7 +18,12 @@ export const useGraphStore = create((set, get) => ({
 
     // Initializes the entire graph state
     loadInitialData: async (session) => {
-        set({ loading: true, session });
+
+        if (get().isInitialLoad) {
+            set({ loading: true });
+        }
+        set({ session });
+
         const userId = session?.user?.id;
         let nodesMap = new Map();
         let edgesMap = new Map();
@@ -42,7 +48,13 @@ export const useGraphStore = create((set, get) => ({
         const collapsedKey = `orbit-collapsed-state-${userId || 'anonymous'}`;
         const savedCollapsed = new Set(JSON.parse(localStorage.getItem(collapsedKey) || '[]'));
 
-        set({ allNodes: nodesMap, allEdges: edgesMap, collapsedIds: savedCollapsed, loading: false });
+        set({
+            allNodes: nodesMap,
+            allEdges: edgesMap,
+            collapsedIds: savedCollapsed,
+            loading: false,
+            isInitialLoad: false
+        });
     },
 
     // Toggles a node's collapsed state

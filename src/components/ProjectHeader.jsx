@@ -1,7 +1,14 @@
 import { getProjectHeaderStyle } from './styles'
 export const ProjectHeader = ({ isDark }) => (
   <div style={getProjectHeaderStyle(isDark)}>
-    <div style={{ fontSize: '20px' }}>🌌</div>
+    <div style={{ fontSize: '20px' }}>
+      <img 
+      src={isDark ? 'orbit.png' : 'orbit_inv.png'} 
+      alt={isDark ? 'Orbit logo (dark)' : 'Orbit logo (light)'} 
+      height={40}
+      width={40}
+      />  
+    </div>
     <div>
       <h1
         style={{
