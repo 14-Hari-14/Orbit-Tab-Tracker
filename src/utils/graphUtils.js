@@ -35,7 +35,7 @@ export const generateNodeTitle = (node) => {
 
 // creating root node on initial load
 export const createInitialData = () => {
-    const initialNodes = new DataSet([{ id: 1, label: "Root", shape: "circle", value: 25, isParent: true, note: "Start building your knowledge graph from here!" }]);
+    const initialNodes = new DataSet([{ id: 1, label: "Root", shape: "circle", value: 25, is_parent: true, note: "Start building your knowledge graph from here!" }]);
     initialNodes.forEach(node => {
         initialNodes.update({ ...node, title: generateNodeTitle(node) });
     });

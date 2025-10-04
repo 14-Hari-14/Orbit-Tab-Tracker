@@ -215,6 +215,7 @@ export const useVisNetwork = (initialData, isDark) => {
     }, [data, getDirectChildren]);
 
     useEffect(() => {
+        console.log("Network setup useEffect");
         const options = getNetworkOptions(isDark);
         const network = new Network(containerRef.current, data, options);
         networkRef.current = network;
@@ -269,6 +270,7 @@ export const useVisNetwork = (initialData, isDark) => {
     }, [data, isDark, autoSave, collapseNode, recursiveOpenDescendants, getBottomUpOrder]);
 
     useEffect(() => {
+        console.log("network options updated");
         if (networkRef.current) {
             networkRef.current.setOptions(getNetworkOptions(isDark));
         }

@@ -1,16 +1,17 @@
-// File: utils/localStorage.js (New File)
-// This file contains functions for interacting with the browser's local storage.
-
-import { generateNodeTitle } from './graphUtils'; // We'll need this for the data loader
+// File: src/utils/localStorage.js (Corrected)
 
 const LOCAL_STORAGE_KEY = 'orbit-graph-data-v1';
 
-export const saveDataToLocalStorage = (nodes, edges, collapsedIds) => {
+export const saveDataToLocalStorage = (nodes, edges) => {
     try {
+        // Ensure nodes and edges are valid before trying to access them
+        if (!nodes || !edges) {
+            console.error("Attempted to save null/undefined nodes or edges.");
+            return;
+        }
         const plainNodes = nodes.get({ returnType: 'Array' });
         const plainEdges = edges.get({ returnType: 'Array' });
-        const plainCollapsed = Array.from(collapsedIds);
-        const dataToStore = JSON.stringify({ nodes: plainNodes, edges: plainEdges, collapsed: plainCollapsed });
+        const dataToStore = JSON.stringify({ nodes: plainNodes, edges: plainEdges });
         localStorage.setItem(LOCAL_STORAGE_KEY, dataToStore);
     } catch (error) {
         console.error("Failed to save graph data:", error);

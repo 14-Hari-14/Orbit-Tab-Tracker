@@ -1,126 +1,222 @@
-// File: src/hooks/useGraphData.js (Updated)
-
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { DataSet } from 'vis-network/standalone';
 import { api } from '../api';
 import { loadDataFromLocalStorage, saveDataToLocalStorage } from '../utils/localStorage';
-import { createInitialData } from '../utils/graphUtils';
+import { createInitialData, generateNodeTitle } from '../utils/graphUtils';
 
-export const useGraphData = (session) => {
+const getCollapsedStorageKey = (userId) => `orbit-collapsed-state-${userId || 'anonymous'}`;
+
+export const useGraphData = (session, networkRef) => {
+    // --- STATE AND REFS ---
     const [loading, setLoading] = useState(true);
     const [data, setData] = useState({
         nodes: new DataSet([]),
         edges: new DataSet([]),
     });
+    const allNodes = useRef(new Map());
+    const allEdges = useRef(new Map());
+    const collapsedParentIds = useRef(new Set());
 
-    // This effect now ONLY depends on the session, preventing re-runs.
+    // --- HELPER FUNCTIONS ---
+    const getDirectChildren = useCallback((parentId) => {
+        return Array.from(allEdges.current.values()).filter(edge => edge.from === parentId);
+    }, []);
+
+    const getAllDescendants = useCallback((parentId) => {
+        const descendants = new Set();
+        const childrenEdges = getDirectChildren(parentId);
+        for (const edge of childrenEdges) {
+            descendants.add(edge.to);
+            getAllDescendants(edge.to).forEach(descendantId => descendants.add(descendantId));
+        }
+        return descendants;
+    }, [getDirectChildren]);
+
+    // --- DATA LOADING ---
     useEffect(() => {
+        console.log("data loading use effect");
         const loadData = async () => {
             setLoading(true);
-            const nodesDataSet = new DataSet([]);
-            const edgesDataSet = new DataSet([]);
+            const userId = session?.user?.id;
 
             if (session) {
                 const { nodes: dbNodes, edges: dbEdges } = await api.fetchGraphData();
-
-                if (dbNodes.length === 0) {
-                    const rootNodeData = { label: "Root", is_parent: true, shape: 'circle'};
-                    const newRoot = await api.addNode(rootNodeData);
-                    nodesDataSet.add(newRoot);
-                } else {
-                    nodesDataSet.add(dbNodes);
-                    const formattedEdges = dbEdges.map(e => ({ ...e, from: e.from_node, to: e.to_node }));
-                    edgesDataSet.add(formattedEdges);
+                allNodes.current.clear();
+                (dbNodes || []).forEach(n => allNodes.current.set(n.id, n));
+                allEdges.current.clear();
+                (dbEdges || []).forEach(e => allEdges.current.set(e.id, { ...e, from: e.from_node, to: e.to_node }));
+                if (allNodes.current.size === 0) {
+                    const rootNodeForDB = { label: "Root", is_parent: true };
+                    const newRootFromDB = await api.addNode(rootNodeForDB);
+                    allNodes.current.set(newRootFromDB.id, newRootFromDB);
                 }
-
             } else {
                 const localData = loadDataFromLocalStorage();
-                if (localData && localData.nodes?.length > 0) {
-                    nodesDataSet.add(localData.nodes);
-                    edgesDataSet.add(localData.edges);
-                } else {
-                    const { nodes: initialNodes, edges: initialEdges } = createInitialData();
-                    nodesDataSet.add(initialNodes.get());
-                    edgesDataSet.add(initialEdges.get());
-                }
+                allNodes.current.clear();
+                (localData?.nodes || createInitialData().nodes.get()).forEach(n => allNodes.current.set(n.id, n));
+                allEdges.current.clear();
+                (localData?.edges || []).forEach(e => allEdges.current.set(e.id, e));
             }
 
-            setData({ nodes: nodesDataSet, edges: edgesDataSet });
+            const collapsedKey = getCollapsedStorageKey(userId);
+            collapsedParentIds.current = new Set(JSON.parse(localStorage.getItem(collapsedKey) || '[]'));
+
+            const nodesToDisplay = [];
+            const nodesToHide = new Set();
+
+            collapsedParentIds.current.forEach(parentId => {
+                getAllDescendants(parentId).forEach(descendantId => nodesToHide.add(descendantId));
+            });
+
+            allNodes.current.forEach(node => {
+                if (!nodesToHide.has(node.id)) {
+                    let displayNode = { ...node, shape: node.is_parent ? 'circle' : 'box', value: node.is_parent ? 25 : 20, title: generateNodeTitle(node) };
+                    if (collapsedParentIds.current.has(node.id)) {
+                        const directChildrenCount = getDirectChildren(node.id).length;
+                        displayNode.label = `${node.label} (+${directChildrenCount})`;
+                    }
+                    nodesToDisplay.push(displayNode);
+                }
+            });
+
+            setData({
+                nodes: new DataSet(nodesToDisplay),
+                edges: new DataSet(Array.from(allEdges.current.values()))
+            });
             setLoading(false);
         };
-
         loadData();
     }, [session]);
 
+    // --- DATA MODIFICATION HANDLERS ---
     const handleAddNode = useCallback(async (nodeData, parentId) => {
+        const dataToSave = { label: nodeData.label, url: nodeData.url, note: nodeData.note, is_parent: nodeData.is_parent };
         if (session) {
-            const newNode = await api.addNode(nodeData);
-            data.nodes.add(newNode);
+            const newNodeFromDB = await api.addNode(dataToSave);
+            const fullNode = { ...newNodeFromDB, ...nodeData };
+            allNodes.current.set(newNodeFromDB.id, fullNode);
+            data.nodes.add({ ...fullNode, title: generateNodeTitle(fullNode) });
             if (parentId) {
-                const newEdge = await api.addEdge(parentId, newNode.id);
-                data.edges.add({ ...newEdge, from: newEdge.from_node, to: newEdge.to_node });
+                const newEdge = await api.addEdge(parentId, newNodeFromDB.id);
+                const formattedEdge = { ...newEdge, from: newEdge.from_node, to: newEdge.to_node };
+                allEdges.current.set(newEdge.id, formattedEdge);
+                data.edges.add(formattedEdge);
             }
         } else {
             const newNode = { id: Date.now(), ...nodeData };
-            data.nodes.add(newNode);
+            allNodes.current.set(newNode.id, newNode);
+            data.nodes.add({ ...newNode, title: generateNodeTitle(newNode) });
             if (parentId) {
-                data.edges.add({ from: parentId, to: newNode.id });
+                const newEdge = { id: Date.now() + 1, from: parentId, to: newNode.id };
+                allEdges.current.set(newEdge.id, newEdge);
+                data.edges.add(newEdge);
             }
-            saveDataToLocalStorage(data.nodes, data.edges);
+            saveDataToLocalStorage(Array.from(allNodes.current.values()), Array.from(allEdges.current.values()), collapsedParentIds.current);
         }
     }, [session, data]);
 
-    // --- NEW: Fully implemented handleDeleteNode ---
     const handleDeleteNode = useCallback(async (nodeId) => {
         if (!nodeId) return;
-
-        // Helper to get all descendants of a node
-        const getAllDescendants = (id) => {
-            let children = data.edges.get({ filter: edge => edge.from === id }).map(edge => edge.to);
-            let descendants = [...children];
-            children.forEach(childId => {
-                descendants = [...descendants, ...getAllDescendants(childId)];
-            });
-            return descendants;
-        };
-
-        const nodesToDelete = [nodeId, ...getAllDescendants(nodeId)];
-
+        const nodesToDelete = [nodeId, ...Array.from(getAllDescendants(nodeId))];
         if (session) {
-            // In Supabase, we only need to delete the parent nodes.
-            // The `ON DELETE CASCADE` in our database schema will handle deleting all children.
-            // For safety, we can delete all explicitly, starting from the children.
             try {
-                for (const id of nodesToDelete.reverse()) {
-                    await api.deleteNode(id);
-                }
-                data.nodes.remove(nodesToDelete);
-            } catch (error) {
-                console.error("Failed to delete nodes from Supabase:", error);
-            }
-        } else {
-            // For local storage, we just remove them from the DataSet
-            data.nodes.remove(nodesToDelete);
-            saveDataToLocalStorage(data.nodes, data.edges);
+                await api.deleteNode(nodeId);
+            } catch (error) { console.error("Failed to delete node from Supabase:", error); }
         }
-    }, [session, data]);
+        nodesToDelete.forEach(id => allNodes.current.delete(id));
+        allEdges.current.forEach(edge => {
+            if (nodesToDelete.includes(edge.from) || nodesToDelete.includes(edge.to)) {
+                allEdges.current.delete(edge.id);
+            }
+        });
+        data.nodes.remove(nodesToDelete);
+        if (!session) {
+            saveDataToLocalStorage(Array.from(allNodes.current.values()), Array.from(allEdges.current.values()), collapsedParentIds.current);
+        }
+    }, [session, data, getAllDescendants]);
 
     const handleUpdateNode = useCallback(async (nodeData) => {
+        const dataToSave = { id: nodeData.id, label: nodeData.label, url: nodeData.url, note: nodeData.note, is_parent: nodeData.is_parent };
         if (session) {
-            const updatedNode = await api.updateNode(nodeData);
-            data.nodes.update(updatedNode);
+            const updatedNodeFromDB = await api.updateNode(dataToSave);
+            const fullNode = { ...allNodes.current.get(updatedNodeFromDB.id), ...updatedNodeFromDB };
+            allNodes.current.set(updatedNodeFromDB.id, fullNode);
+            data.nodes.update({ ...fullNode, title: generateNodeTitle(fullNode) });
         } else {
-            data.nodes.update(nodeData);
-            saveDataToLocalStorage(data.nodes, data.edges);
+            const fullNode = { ...allNodes.current.get(nodeData.id), ...nodeData };
+            allNodes.current.set(nodeData.id, fullNode);
+            data.nodes.update({ ...fullNode, title: generateNodeTitle(fullNode) });
+            saveDataToLocalStorage(Array.from(allNodes.current.values()), Array.from(allEdges.current.values()), collapsedParentIds.current);
         }
     }, [session, data]);
 
+    // --- INTERACTION HANDLERS ---
+    const handleToggleCollapse = useCallback((nodeId) => {
+        const node = allNodes.current.get(nodeId);
+        if (!node || !node.is_parent) return;
+
+        const userId = session?.user?.id;
+        const storageKey = getCollapsedStorageKey(userId);
+        const isCollapsed = collapsedParentIds.current.has(nodeId);
+
+        if (isCollapsed) {
+            collapsedParentIds.current.delete(nodeId);
+            const descendants = getAllDescendants(nodeId);
+            const nodesToAdd = [];
+            descendants.forEach(descendantId => {
+                const descendantNode = allNodes.current.get(descendantId);
+                if (descendantNode) {
+                    nodesToAdd.push({ ...descendantNode, shape: descendantNode.is_parent ? 'circle' : 'box', value: descendantNode.is_parent ? 25 : 20, title: generateNodeTitle(descendantNode) });
+                }
+            });
+            data.nodes.add(nodesToAdd);
+            data.nodes.update({ id: nodeId, label: node.label, title: generateNodeTitle(node) });
+        } else {
+            collapsedParentIds.current.add(nodeId);
+            const descendants = getAllDescendants(nodeId);
+            const directChildrenCount = getDirectChildren(nodeId).length;
+            data.nodes.update({ id: nodeId, label: `${node.label} (+${directChildrenCount})` });
+            data.nodes.remove(Array.from(descendants));
+        }
+
+        localStorage.setItem(storageKey, JSON.stringify(Array.from(collapsedParentIds.current)));
+    }, [session, data.nodes, getAllDescendants, getDirectChildren]);
+
+    const handleClearSelection = useCallback((network) => { network?.unselectAll(); }, []);
+
+    const handleOpenUrl = useCallback((url, nodeId) => {
+        let targetUrl = url;
+        if (!targetUrl && nodeId) {
+            const node = allNodes.current.get(nodeId);
+            targetUrl = node?.url;
+        }
+        if (targetUrl) {
+            window.open(targetUrl, '_blank');
+        }
+    }, []);
+
+    const handleSearchSelect = useCallback((nodeId, network) => {
+        if (!data.nodes.get(nodeId)) {
+            // A full implementation would find the path and expand ancestors.
+            console.log("Node is currently in a collapsed cluster.");
+            return;
+        }
+        network?.focus(nodeId, { animation: true });
+        network?.selectNodes([nodeId]);
+    }, [data.nodes]);
+
+    // --- RETURN STATEMENT ---
     return {
         loading,
         nodes: data.nodes,
         edges: data.edges,
+        collapsedParentIds: collapsedParentIds.current,
         handleAddNode,
         handleDeleteNode,
         handleUpdateNode,
+        handleToggleCollapse,
+        handleClearSelection,
+        handleOpenUrl,
+        handleSearchSelect,
     };
 };
