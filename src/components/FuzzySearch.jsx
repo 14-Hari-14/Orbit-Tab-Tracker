@@ -8,7 +8,6 @@ const FuzzySearch = ({ isOpen, onClose, nodes, isDark, onSelectNode, onEditNode,
   const inputRef = useRef(null);
   const resultsRef = useRef(null);
 
-  // --- LOGIC (UNCHANGED) ---
   const fuse = new Fuse(nodes, {
     keys: ['label', 'note', 'url'],
     threshold: 0.3,
@@ -94,12 +93,12 @@ const FuzzySearch = ({ isOpen, onClose, nodes, isDark, onSelectNode, onEditNode,
 
   if (!isOpen) return null;
 
-  // --- STYLES (MODIFIED) ---
+  
   const overlayStyle = { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0, 0, 0, 0.5)', display: 'flex', alignItems: 'flex-start', justifyContent: 'center', zIndex: 10000, paddingTop: '15vh' };
   const modalStyle = { display: 'flex', flexDirection: 'column', width: '90%', maxWidth: '600px', backgroundColor: isDark ? '#1a202c' : '#ffffff', borderRadius: '12px', boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)', border: `1px solid ${isDark ? '#4a5568' : '#e2e8f0'}`, overflow: 'hidden' };
   const inputContainerStyle = { position: 'relative', padding: '16px', borderBottom: `1px solid ${isDark ? '#4a5568' : '#e2e8f0'}` };
   const inputStyle = {
-    // ✅ FIX: This prevents the input from overflowing its container
+    // This prevents the input from overflowing its container
     boxSizing: 'border-box',
     width: '100%',
     padding: '12px 16px 12px 40px',

@@ -1,110 +1,120 @@
 // styles.js
 
 // Function to generate the main vis-network options based on the theme
-export const getNetworkOptions = (isDark) => ({
-    nodes: {
-        shape: "box",
-        font: {
-            size: 16,
-            color: isDark ? '#ffffff' : '#333333',
-            // background: isDark ? 'rgba(0,0,0,0.7)' : 'rgba(255,255,255,0.7)'
-        },
-        scaling: {
-            min: 20,  // The smallest a node can be
-            max: 50,  // The largest a node can be
-            label: {
-                enabled: true, // Allow the label to influence the size
-                min: 20,       // Minimum font size
-                max: 50,       // Maximum font size
+
+// export const getNetworkOptions = (isDark) => ({
+//     nodes: {
+//         shape: "box",
+//         font: {
+//             size: 16,
+//             color: isDark ? '#ffffff' : '#333333',
+//             // background: isDark ? 'rgba(0,0,0,0.7)' : 'rgba(255,255,255,0.7)'
+//         },
+//         scaling: {
+//             min: 20,  // The smallest a node can be
+//             max: 50,  // The largest a node can be
+//             label: {
+//                 enabled: true, // Allow the label to influence the size
+//                 min: 20,       // Minimum font size
+//                 max: 50,       // Maximum font size
+//             },
+//         },
+
+//         borderWidth: 2,
+//         color: {
+//             border: isDark ? '#555555' : '#cccccc',
+//             background: isDark ? '#2d2d2d' : '#ffffff',
+//             highlight: {
+//                 border: '#007acc',
+//                 background: isDark ? '#3d3d3d' : '#e6f3ff'
+//             }
+//         },
+//         shadow: {
+//             enabled: true,
+//             color: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.2)',
+//             size: 10, x: 2, y: 2
+//         }
+//     },
+//     edges: {
+//         arrows: "to",
+//         color: {
+//             color: isDark ? '#666666' : '#848484',
+//             highlight: '#007acc'
+//         },
+//         width: 2,
+//         length: 300,
+//         shadow: {
+//             enabled: true,
+//             color: isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.1)',
+//             size: 5, x: 1, y: 1
+//         }
+//     },
+//     interaction: {
+//         hover: true,
+//         tooltipDelay: 200,
+//         selectConnectedEdges: false
+//     },
+//     physics: {
+//         enabled: true,
+//         stabilization: { iterations: 100 }
+//     }
+// });
+
+export const getNetworkOptions = (isDark) => {
+    return {
+        autoResize: true,
+        nodes: {
+            shape: 'box',
+            borderWidth: 2,
+            font: {
+                color: isDark ? '#e2e8f0' : '#2d3748',
+                face: 'Electrolize, sans-serif',
+            },
+            color: {
+                border: isDark ? '#4a5568' : '#cbd5e0',
+                background: isDark ? '#2d3748' : '#ffffff',
+                highlight: {
+                    border: '#007acc',
+                    background: isDark ? '#1a202c' : '#edf2f7',
+                },
             },
         },
-        margin: 10,
-        borderWidth: 2,
-        color: {
-            border: isDark ? '#555555' : '#cccccc',
-            background: isDark ? '#2d2d2d' : '#ffffff',
-            highlight: {
-                border: '#007acc',
-                background: isDark ? '#3d3d3d' : '#e6f3ff'
+        edges: {
+            color: {
+                color: isDark ? '#4a5568' : '#cbd5e0',
+                highlight: '#007acc',
+            },
+            arrows: {
+                to: { enabled: true, scaleFactor: 0.7 }
+            },
+            smooth: {
+                enabled: true,
+                type: 'dynamic',
+                roundness: 0.5
             }
         },
-        font: {
-            size: 14,
-            color: isDark ? '#ffffff' : '#000000',
-            face: 'Electrolize, sans-serif'
+        interaction: {
+            hover: true,
+            tooltipDelay: 200,
         },
-        shadow: {
+        // --- THIS IS THE NEW/UPDATED SECTION ---
+        physics: {
             enabled: true,
-            color: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.2)',
-            size: 10, x: 2, y: 2
+            barnesHut: {
+                gravitationalConstant: -8000,
+                centralGravity: 0.3,
+                springLength: 120,
+                springConstant: 0.04,
+                damping: 0.09,
+                avoidOverlap: 0.5
+            },
+            solver: 'barnesHut',
+            stabilization: {
+                iterations: 1000,
+            },
         },
-        chosen: {
-            node: function (values, id, selected, hovering) {
-                values.borderWidth = 3;
-                values.color = '#007acc';
-            }
-        }
-    },
-    edges: {
-        arrows: "to",
-        color: {
-            color: isDark ? '#666666' : '#848484',
-            highlight: '#007acc'
-        },
-        width: 2,
-        length: 200,
-        smooth: {
-            enabled: true,
-            type: "dynamic",
-            roundness: 0.5
-        },
-        shadow: {
-            enabled: true,
-            color: isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.1)',
-            size: 5, x: 1, y: 1
-        },
-        chosen: {
-            edge: function (values, id, selected, hovering) {
-                values.color = '#007acc';
-                values.width = 3;
-            }
-        }
-    },
-    interaction: {
-        hover: true,
-        tooltipDelay: 200,
-        selectConnectedEdges: false
-    },
-    physics: {
-        enabled: true,
-        stabilization: {
-            iterations: 200,
-            updateInterval: 25,
-            onlyDynamicEdges: false,
-            fit: true
-        },
-        barnesHut: {
-            gravitationalConstant: -2000,
-            centralGravity: 0.3,
-            springLength: 120,
-            springConstant: 0.04,
-            damping: 0.09,
-            avoidOverlap: 0.5
-        },
-        solver: 'barnesHut',
-        timestep: 0.5,
-        adaptiveTimestep: true,
-        minVelocity: 0.75,
-        maxVelocity: 30
-    },
-    layout: {
-        improvedLayout: true,
-        clusterThreshold: 150,
-        hierarchical: {
-            enabled: false
-        }
-    }
-});
+    };
+};
 
 // Project Header component styles
 export const getProjectHeaderStyle = (isDark) => ({
@@ -125,26 +135,25 @@ export const getProjectHeaderStyle = (isDark) => ({
 
 // Theme Toggle component styles
 export const getThemeToggleStyle = (isDark) => ({
-    height: '40px', // Match login button height
-    width: '40px', // Make it a square
+    position: 'fixed',
+    top: '20px',
+    right: '240px',
     zIndex: 1000,
     backgroundColor: isDark ? 'rgba(40, 40, 40, 0.95)' : 'rgba(255, 255, 255, 0.95)',
     backdropFilter: 'blur(10px)',
     border: `1px solid ${isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)'}`,
-    borderRadius: '8px', // Match login button
+    borderRadius: '12px',
     boxShadow: '0 8px 32px rgba(0, 0, 0, 0.1)',
+    padding: '12px',
     cursor: 'pointer',
     transition: 'all 0.2s ease',
-    display: 'flex', // Center the icon
-    alignItems: 'center',
-    justifyContent: 'center'
 });
 
 // Fixed Toolbar component styles
 export const getFixedToolbarStyle = (isDark) => ({
     position: 'fixed',
-    top: '90px',
-    right: '20px',
+    top: '120px',
+    left: '20px',
     zIndex: 1000,
     backgroundColor: isDark ? 'rgba(40, 40, 40, 0.95)' : 'rgba(255, 255, 255, 0.95)',
     backdropFilter: 'blur(10px)',

@@ -1,42 +1,35 @@
-import { useCallback, useEffect } from 'react';
+// File: src/hooks/useKeyboardShortcuts.js (Updated)
 
-export const useKeyboardShortcuts = ({
-    selectedNodeId,
-    modalState,
-    nodes,
-    onAddRootNode,
-    onAddNode,
-    onDeleteNode,
-    onEditNode,
-    onAddEditNote,
-    onToggleCollapse,
-    showKeyboardFeedback
-}) => {
-    const handleKeyDown = useCallback(async (event) => {
-        if (event.target.tagName === 'INPUT' ||
-            event.target.tagName === 'TEXTAREA' ||
-            event.target.contentEditable === 'true' ||
-            modalState.isOpen) {
+import { useEffect, useCallback } from 'react';
+import { shortcuts } from '../config/shortcut';
+
+// The handlers object now expects a structure like: { onAdd: { handler: func, enabled: bool } }
+export const useKeyboardShortcuts = (handlers, isInputActive) => {
+    const handleKeyDown = useCallback((event) => {
+        if (isInputActive) {
             return;
         }
 
-        const { key, ctrlKey } = event;
-        const selectedNode = selectedNodeId ? nodes.current.get(selectedNodeId) : null;
+        const shortcut = shortcuts.find(s =>
+            s.key.toLowerCase() === event.key.toLowerCase() &&
+            !!s.ctrlKey === event.ctrlKey && // Ensure boolean comparison
+            !!s.shiftKey === event.shiftKey // Add shift key support
+        );
 
-        const preventDefault = () => {
-            event.preventDefault();
-            event.stopPropagation();
-        };
-
-        // Handle all keyboard shortcuts here...
-        // This makes it much easier to manage and test
-
-    }, [selectedNodeId, modalState.isOpen, /* other dependencies */]);
+        if (shortcut) {
+            const handlerObject = handlers[shortcut.handler];
+            // Check if the handlerObject exists AND if it's currently enabled.
+            if (handlerObject && handlerObject.enabled) {
+                event.preventDefault();
+                handlerObject.handler();
+            }
+        }
+    }, [handlers, isInputActive]);
 
     useEffect(() => {
-        document.addEventListener('keydown', handleKeyDown);
-        return () => document.removeEventListener('keydown', handleKeyDown);
+        window.addEventListener('keydown', handleKeyDown);
+        return () => {
+            window.removeEventListener('keydown', handleKeyDown);
+        };
     }, [handleKeyDown]);
-
-    return null; // This hook only manages side effects
 };
