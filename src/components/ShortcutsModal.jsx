@@ -59,8 +59,8 @@ export const ShortcutsModal = ({ isOpen, onClose, isDark }) => {
     },
     modal: {
       fontFamily: 'sans-serif',
-      backgroundColor: isDark ? '#2D3748' : '#F7FAFC',
-      color: isDark ? '#E2E8F0' : '#2D3748',
+      backgroundColor: isDark ? '#1a1a1a' : '#F7FAFC',
+      color: isDark ? '#E2E8F0' : '#1a1a1a',
       padding: '24px', borderRadius: '8px',
       width: '500px', border: `1px solid ${isDark ? '#4A5568' : '#E2E8F0'}`,
       boxShadow: '0 10px 25px rgba(0,0,0,0.3)',

@@ -146,14 +146,14 @@ export const getThemeToggleStyle = (isDark) => ({
     boxShadow: '0 8px 32px rgba(0, 0, 0, 0.1)',
     padding: '12px',
     cursor: 'pointer',
-    transition: 'all 0.2s ease'
+    transition: 'all 0.2s ease',
 });
 
 // Fixed Toolbar component styles
 export const getFixedToolbarStyle = (isDark) => ({
     position: 'fixed',
-    top: '90px',
-    right: '20px',
+    top: '120px',
+    left: '20px',
     zIndex: 1000,
     backgroundColor: isDark ? 'rgba(40, 40, 40, 0.95)' : 'rgba(255, 255, 255, 0.95)',
     backdropFilter: 'blur(10px)',

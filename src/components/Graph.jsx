@@ -25,7 +25,11 @@ export default function Graph({ session }) {
   const containerRef = useRef(null);
   const networkRef = useRef(null);
   
-  const [isDark, setIsDark] = useState(true);
+  const [isDark, setIsDark] = useState(() => {
+    const savedTheme = localStorage.getItem('orbit-theme');
+    return savedTheme ? JSON.parse(savedTheme) : true;
+  });
+
   const [selectedNodeId, setSelectedNodeId] = useState(null);
   const [modalState, setModalState] = useState({ isOpen: false, mode: null, nodeData: null, parentId: null });
   const [isShortcutsModalOpen, setIsShortcutsModalOpen] = useState(false);
@@ -34,6 +38,12 @@ export default function Graph({ session }) {
 
   const store = useGraphStore();
   const { loading, allNodes, allEdges, collapsedIds, loadInitialData } = store;
+
+  const handleThemeToggle = () => {
+    const newThemeIsDark = !isDark;
+    setIsDark(newThemeIsDark);
+    localStorage.setItem('orbit-theme', JSON.stringify(newThemeIsDark));
+  };
 
   const { visibleNodes, visibleEdges } = useMemo(() => {
     if (loading) return { visibleNodes: new DataSet([]), visibleEdges: new DataSet([]) };
@@ -87,14 +97,23 @@ export default function Graph({ session }) {
   useEffect(() => {
     if (loading || !containerRef.current) return;
     const network = new Network(containerRef.current, { nodes: visibleNodes, edges: visibleEdges }, getNetworkOptions(isDark));
+
     networkRef.current = network;
+    // network.on("dragEnd", (params) => {
+    //   const finalPosition = network.getPositions(params.nodes);
+    //   for(const nodeId of Object.keys(finalPosition)){
+    //     store.updateNodePosition(parseInt(nodeId), finalPosition[nodeId]);
+    //   }
+    // }); 
+
     network.on("selectNode", (params) => setSelectedNodeId(params.nodes[0] || null));
     network.on("deselectNode", () => setSelectedNodeId(null));
     network.on("doubleClick", (params) => {
       if (params.nodes.length > 0) store.toggleCollapse(params.nodes[0]);
     });
     return () => { if (networkRef.current) { networkRef.current.destroy(); networkRef.current = null; } };
-  }, [loading, isDark, visibleNodes, visibleEdges, store.toggleCollapse]);
+  }, [loading, isDark, visibleNodes, visibleEdges]);
+
 
   const selectedNode = selectedNodeId ? allNodes.get(selectedNodeId) : null;
   const showNotification = (message, type = 'error') => setNotification({ message, type, visible: true });
@@ -151,7 +170,7 @@ export default function Graph({ session }) {
     <GridBg isDark={isDark}>
       {!session && <WarningBanner onLoginClick={handleLogin} />}
       <ProjectHeader isDark={isDark} />
-      <ThemeToggle isDark={isDark} onToggle={() => setIsDark(!isDark)} />
+      <ThemeToggle isDark={isDark} onToggle={handleThemeToggle} />
       {notification.visible && <Notification message={notification.message} type={notification.type} onClose={closeNotification} />}
       
       <FixedToolbar

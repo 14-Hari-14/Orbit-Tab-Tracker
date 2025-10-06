@@ -16,6 +16,31 @@ export const useGraphStore = create((set, get) => ({
 
     // --- ACTIONS ---
 
+    // Update node position
+    // updateNodePosition: async (nodeId, position) => {
+    //     const { allNodes, session } = get();
+    //     const node = allNodes.get(nodeId);
+
+    //     if (node) {
+    //         // Update the position in the local cache immediately 
+    //         allNodes.set(nodeId, { ...node, x: position.x, y: position.y });
+    //         set({ allNodes: new Map(allNodes) });
+
+    //         // If the user is logged in, save the change to the database
+    //         if (session) {
+    //             try {
+    //                 await api.updateNodePosition(nodeId, position);
+    //             } catch (error) {
+    //                 console.error("Failed to save node position:", error);
+    //                 // Optional: Revert the change in the UI if the save fails
+    //             }
+    //         } else {
+    //             // For anonymous users, save the entire graph to local storage
+    //             saveDataToLocalStorage(Array.from(allNodes.values()), Array.from(get().allEdges.values()));
+    //         }
+    //     }
+    // },
+
     // Initializes the entire graph state
     loadInitialData: async (session) => {
 
@@ -33,7 +58,7 @@ export const useGraphStore = create((set, get) => ({
             (dbNodes || []).forEach(n => nodesMap.set(n.id, n));
             (dbEdges || []).forEach(e => edgesMap.set(e.id, { ...e, from: e.from_node, to: e.to_node }));
             if (nodesMap.size === 0) {
-                const rootNodeForDB = { label: "Root", is_parent: true };
+                const rootNodeForDB = { label: "Root", is_parent: true, x: 0, y: 0 };
                 const newRootFromDB = await api.addNode(rootNodeForDB);
                 nodesMap.set(newRootFromDB.id, newRootFromDB);
             }

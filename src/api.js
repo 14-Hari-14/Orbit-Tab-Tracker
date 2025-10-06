@@ -79,6 +79,20 @@ async function deleteNode(nodeId) {
     if (error) throw error;
 }
 
+// /**
+//  * Updates only the x and y position of an existing node.
+//  * @param {number} nodeId - The ID of the node to update.
+//  * @param {object} position - An object with { x, y } coordinates.
+//  */
+// async function updateNodePosition(nodeId, position) {
+//     const { error } = await supabase
+//         .from('nodes')
+//         .update({ x: position.x, y: position.y })
+//         .eq('id', nodeId);
+
+//     if (error) throw error;
+// }
+
 // Export all functions as a single object
 export const api = {
     fetchGraphData,
@@ -86,4 +100,6 @@ export const api = {
     addEdge,
     updateNode,
     deleteNode,
+    // updateNodePosition,
 };
+
