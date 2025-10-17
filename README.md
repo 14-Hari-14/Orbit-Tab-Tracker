@@ -98,4 +98,4 @@ If you find Orbit helpful, please ⭐ star this repository!
 
 ---
 
-**Built with ❤️ for knowledge workers, researchers, and anyone who loves connecting ideas.**
+

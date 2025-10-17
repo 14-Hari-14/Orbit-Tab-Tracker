@@ -78,6 +78,12 @@ export const getNetworkOptions = (isDark) => {
                     background: isDark ? '#1a202c' : '#edf2f7',
                 },
             },
+            margin: {
+                top: 10,
+                bottom: 10,
+                left: 15,
+                right: 15
+            }
         },
         edges: {
             color: {
@@ -91,28 +97,41 @@ export const getNetworkOptions = (isDark) => {
                 enabled: true,
                 type: 'dynamic',
                 roundness: 0.5
-            }
+            },
+            length: 180 // Fixed length for consistent mind-map feel
         },
         interaction: {
             hover: true,
             tooltipDelay: 200,
+            dragNodes: true,
+            dragView: true,
+            zoomView: true
         },
-        // --- THIS IS THE NEW/UPDATED SECTION ---
+        layout: {
+            improvedLayout: true,
+            randomSeed: 1 // Consistent layouts
+        },
         physics: {
             enabled: true,
-            barnesHut: {
-                gravitationalConstant: -8000,
-                centralGravity: 0.3,
-                springLength: 120,
-                springConstant: 0.04,
-                damping: 0.09,
-                avoidOverlap: 0.5
+            solver: 'repulsion', // Switched to repulsion for predictable behavior
+            repulsion: {
+                nodeDistance: 160, // Guarantees no overlap with comfortable spacing
+                centralGravity: 0.6, // Strong center pull for stability
+                springLength: 140, // Consistent edge lengths
+                springConstant: 0.03, // Balanced stiffness
+                damping: 0.12 // Quick stabilization
             },
-            solver: 'barnesHut',
             stabilization: {
-                iterations: 1000,
+                enabled: true,
+                iterations: 150, // Quick stabilization for <100 nodes
+                updateInterval: 25,
+                fit: true,
+                onlyDynamicEdges: false
             },
-        },
+            adaptiveTimestep: true, // Better performance
+            maxVelocity: 35, // Prevent "running away"
+            minVelocity: 0.5 // Natural stopping
+        }
     };
 };
 
