@@ -1,21 +1,30 @@
-MIT License
+Copyright (c) 2025 Harishanker S Nair
 
-Copyright (c) 2025 Orbit Knowledge Graph
+Permission is hereby granted to use, copy, modify, and distribute this software
+and its source code, in whole or in part, for **non-commercial purposes only**,
+subject to the following conditions:
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+1. **No Commercial Use or SaaS Offering**  
+   You may not sell, rent, or offer this software (or modified versions of it)
+   as part of a paid product or service, including software-as-a-service (SaaS),
+   hosted services, or any platform that charges users for access, without
+   explicit written permission from the copyright holder.
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+2. **Attribution**  
+   All copies or substantial portions of this software must include this license
+   notice and clear credit to the original author(s).
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+3. **Free Redistribution**  
+   Any redistributed or modified versions of this software must remain free to
+   use and obtain. You may not charge users to access or download this software.
+
+4. **User Data and Privacy**  
+   This software is designed to store data locally or with user consent via
+   external services. Derivative works must preserve this privacy-respecting
+   behavior and may not collect or transmit user data without explicit consent.
+
+The software is provided "as is", without warranty of any kind, express or
+implied, including but not limited to the warranties of merchantability,
+fitness for a particular purpose, and noninfringement.
+
+For commercial licensing, contact: my email its in the github profile readme

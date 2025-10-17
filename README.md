@@ -1,101 +1,114 @@
-# 🌌 Orbit - Visual Knowledge Graph
+# Orbit Tab Tracker
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![React](https://img.shields.io/badge/React-19.1.1-61dafb.svg)](https://reactjs.org/)
-[![Vite](https://img.shields.io/badge/Vite-7.1.2-646cff.svg)](https://vitejs.dev/)
-[![Supabase](https://img.shields.io/badge/Supabase-3ecf8e.svg)](https://supabase.com/)
+**Description:** Orbit is a fancy tab tracking application I made as an experiment. I made this since whenever I was using the browser especially for learning something I would open a lot of tabs related to the topic so I decided why not make a bookmarking application that follows that principle. Inside each node you can add the browser link and a note related to it. While hovering on it you will be able to see the link and the note attached
 
-> Transform your scattered thoughts into a connected universe of knowledge
+Here is an image to show you how it would look in practise
+![Orbit Tab Tracker screenshot](images/description_1.png)
 
-**Orbit** is a powerful, interactive visual knowledge graph that helps you organize, connect, and explore your ideas in an intuitive network visualization. Build your personal Wikipedia that grows with your thoughts and discoveries.
+Here is the light mode for this
+![Orbit Tab Tracker screenshot](images/description_2.png)
 
-![Orbit Demo](https://via.placeholder.com/800x400/007acc/ffffff?text=Orbit+Knowledge+Graph+Demo)
+Here is the hover feature to show how it would look like
+![Tooltip image](images/tooltip.png)
 
-## ✨ Features
+## Features
 
-🧠 **Visual Knowledge Management** - Transform ideas into connected networks  
-⚡ **Lightning-Fast Search** - Fuzzy search with `Ctrl+K`  
-⌨️ **Keyboard-First Interface** - Complete keyboard navigation  
-🌙 **Dark/Light Themes** - Beautiful adaptive interface  
-☁️ **Cloud Sync** - Seamless sync across devices  
-🔒 **Privacy-First** - Work offline, sync when ready  
-🎨 **Interactive Visualization** - Dynamic clustering and animations
+- **Keyboard First:** Mostly everything in this application can be done via keyboard except for selecting nodes for that you would have to select with the mouse pointer. If anyone reading this has any tips on how I can include that please do contact me or make this an issue
 
-## 🚀 Quick Start
+- **Supabase sync:** If you want you can keep this project completely offline by just using localstorage to persist the data and use it on different browsers, sign in and your data will be stored in supabase
 
-### Online Demo
+- **Fuzzy Search:** The coolest feature for any project is a fuzzy search just press windows + k and it will open the search interface for you.
 
-🔗 **[Try Orbit Live](https://your-orbit-app.vercel.app)**
+- **Clustering:** If the graph gets messy just double click on the parent node to hide children node double click it again to expand it.
 
-### Local Development
+## Installation
+
+To use it just follow the link here: https://orbit-tab-tracker.vercel.app/
+
+To download and modify this
+
+**Step1:** Copy paste this go to the directory created
 
 ```bash
-# Clone the repository
-git clone https://github.com/your-username/orbit-knowledge-graph.git
-cd orbit-knowledge-graph
+git clone https://github.com/14-Hari-14/Orbit-Tab-Tracker.git
+```
 
-# Install dependencies
+**Step 2:** Inside the directory do this
+
+```bash
 npm install
+```
 
-# Set up environment variables
-cp .env.example .env.local
-# Add your Supabase credentials (optional for local development)
+**Step 3:** start the dev server
 
-# Start development server
+```bash
 npm run dev
 ```
 
-Open [http://localhost:5173](http://localhost:5173) to view it in your browser.
+## Contribution
 
-## ⌨️ Keyboard Shortcuts
+1. **Fork the repository**
 
-| Shortcut           | Action                 |
-| ------------------ | ---------------------- |
-| `Ctrl+K`           | Open fuzzy search      |
-| `Ctrl+Q`           | Add new root node      |
-| `Ctrl+A`           | Add child node         |
-| `Enter/F2`         | Edit selected node     |
-| `Delete/Backspace` | Delete selected node   |
-| `Space`            | Toggle collapse/expand |
-| `Ctrl+O`           | Open URL in new tab    |
-| `Escape`           | Clear selection        |
+```bash
+git clone https://github.com/14-Hari-14/Orbit-Tab-Tracker.git
+cd orbit-tab-tracker
+```
 
-## 🛠️ Tech Stack
+2. **Set up development environment**
 
-- **Frontend**: React 19, Vite, Vis-Network
-- **Backend**: Supabase (PostgreSQL)
-- **Search**: Fuse.js fuzzy search
-- **Authentication**: Google OAuth via Supabase
-- **Deployment**: Vercel/Netlify ready
+```bash
+npm install
+npm run dev
+```
 
-## 📖 Documentation
+3. **Create a feature branch**
 
-- 📚 **[Complete Documentation](./PROJECT_DOCUMENTATION.md)**
-- 🚀 **[Deployment Guide](./DEPLOYMENT_GUIDE.md)**
-- 🎯 **[Usage Examples](./examples/)**
+```bash
+git checkout -b feature/your-feature-name
+```
 
-## 🤝 Contributing
+4. **Make your changes**
 
-We welcome contributions! See our [Contributing Guide](CONTRIBUTING.md) for details.
+   - Follow existing code style
+   - Add comments for complex logic
+   - Update documentation if needed
 
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
+5. **Test your changes**
 
-## 📄 License
+   - Test keyboard shortcuts
+   - Test different themes
+   - Test offline functionality
+   - Test with different data sizes
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+6. **Commit and push**
 
-## 🌟 Support
+```bash
+git add .
+git commit -m "feat: add your feature description"
+git push origin feature/your-feature-name
+```
 
-If you find Orbit helpful, please ⭐ star this repository!
+7. **Create a Pull Request**
+   - Clear title and description
+   - Reference related issues
+   - Include screenshots/GIFs for UI changes
 
-- 🐛 **Bug Reports**: [GitHub Issues](https://github.com/your-username/orbit/issues)
-- 💡 **Feature Requests**: [GitHub Discussions](https://github.com/your-username/orbit/discussions)
-- 💬 **Community**: [Discord Server](https://discord.gg/orbit)
+## Credits
 
----
+I would like to thank myself for creating this app instead of using some alternative people far smarter than me created
 
+## License TLDR
 
+This project is provided for free, non-commercial use.  
+Feel free to explore, modify, and share it just don’t sell it or host it as a paid service.  
+If you’d like to use it commercially, please reach out first.
+
+## License
+
+This will feel cheeky but I want this to be free of use and something that shouldnt be modified for profit so here is the license I drafted with the help of AI
+
+Please refer to **[License](./LICENSE)**
+
+For commercial licensing, contact: me my email is in my profile readme
+
+Thank you for checking out this project, if you like it you may leave a star :)

@@ -83,6 +83,10 @@ export const getNetworkOptions = (isDark) => {
                 bottom: 10,
                 left: 15,
                 right: 15
+            },
+            fixed: {
+                x: false,
+                y: false
             }
         },
         edges: {
@@ -94,43 +98,52 @@ export const getNetworkOptions = (isDark) => {
                 to: { enabled: true, scaleFactor: 0.7 }
             },
             smooth: {
-                enabled: true,
-                type: 'dynamic',
-                roundness: 0.5
+                enabled: false, // Straight lines instead of curves
             },
-            length: 180 // Fixed length for consistent mind-map feel
+            width: 2,
+            length: 200, // Consistent edge lengths for structure
+            chosen: false
         },
         interaction: {
             hover: true,
             tooltipDelay: 200,
             dragNodes: true,
             dragView: true,
-            zoomView: true
+            zoomView: true,
+            selectConnectedEdges: false
         },
         layout: {
             improvedLayout: true,
-            randomSeed: 1 // Consistent layouts
+            randomSeed: 1, // Consistent layouts
+            hierarchical: {
+                enabled: false, // We'll use physics for hierarchy
+                sortMethod: 'directed'
+            }
         },
         physics: {
             enabled: true,
-            solver: 'repulsion', // Switched to repulsion for predictable behavior
+            solver: 'repulsion',
             repulsion: {
-                nodeDistance: 160, // Guarantees no overlap with comfortable spacing
-                centralGravity: 0.6, // Strong center pull for stability
-                springLength: 140, // Consistent edge lengths
-                springConstant: 0.03, // Balanced stiffness
-                damping: 0.12 // Quick stabilization
+                nodeDistance: 180, // Increased for more structured spacing
+                centralGravity: 0.8, // Stronger center pull for organization
+                springLength: 160, // Longer springs for cleaner layout
+                springConstant: 0.05, // Stiffer springs for less wobble
+                damping: 0.18 // Quicker stabilization
             },
             stabilization: {
                 enabled: true,
-                iterations: 150, // Quick stabilization for <100 nodes
-                updateInterval: 25,
+                iterations: 200, // More iterations for cleaner layout
+                updateInterval: 20,
                 fit: true,
                 onlyDynamicEdges: false
             },
-            adaptiveTimestep: true, // Better performance
-            maxVelocity: 35, // Prevent "running away"
-            minVelocity: 0.5 // Natural stopping
+            adaptiveTimestep: true,
+            maxVelocity: 25, // Slower, more controlled movements
+            minVelocity: 1.0 // Clean stops
+        },
+        configure: {
+            enabled: false,
+            filter: 'physics,nodes,edges'
         }
     };
 };
