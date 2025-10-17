@@ -109,7 +109,29 @@ export default function Graph({ session }) {
     network.on("selectNode", (params) => setSelectedNodeId(params.nodes[0] || null));
     network.on("deselectNode", () => setSelectedNodeId(null));
     network.on("doubleClick", (params) => {
-      if (params.nodes.length > 0) store.toggleCollapse(params.nodes[0]);
+      // 1. Check that a node was double-clicked
+      if (!params.nodes || params.nodes.length === 0) return;
+
+      const nodeId = params.nodes[0];
+      const node = allNodes.get(nodeId); // allNodes is a Map<DataSet-like>
+
+      // 2. If the node has a URL → open it in a new tab
+      if (node?.url) {
+        const url = node.url.startsWith("http") ? node.url : `https://${node.url}`;
+        window.open(url, "_blank", "noopener,noreferrer");
+        return; // stop here, don't also toggle collapse
+      }
+
+      // 3. If it's a vis-network cluster → open the cluster
+      if (typeof network.isCluster === "function" && network.isCluster(nodeId)) {
+        network.openCluster(nodeId);
+        return;
+      }
+
+      // 4. If it's a parent node → toggle collapse
+      if (node?.is_parent) {
+        store.toggleCollapse(nodeId);
+      }
     });
     return () => { if (networkRef.current) { networkRef.current.destroy(); networkRef.current = null; } };
   }, [loading, isDark, visibleNodes, visibleEdges]);
